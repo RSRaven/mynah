@@ -1,0 +1,120 @@
+name: release
+
+# On a version tag, build the whole release on windows-latest **with no GPU** —
+# the Vulkan pack (we build it; no upstream asset exists), the small PyInstaller base, the
+# portable zip, the Inno installer, and the pinned manifest.json — then attach them to the
+# GitHub Release. `workflow_dispatch` does the same build but uploads the artifacts to the run
+# (a dry run) instead of publishing a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dev"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Building Mynah $V (ref ${GITHUB_REF_NAME})"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # --- Vulkan whisper.cpp pack (we host it; no upstream Vulkan asset) ----------------
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = "$env:RUNNER_TEMP\vulkan_sdk.exe"
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile $exe
+          Start-Process -FilePath $exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          $sdk = (Get-ChildItem C:\VulkanSDK | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          Write-Host "VULKAN_SDK=$sdk"
+
+      - name: Build Vulkan whisper.cpp pack
+        shell: cmd
+        run: call scripts\build_wcpp_vulkan.bat
+
+      - name: Zip Vulkan pack
+        shell: bash
+        run: |
+          mkdir -p dist
+          python scripts/pack_vulkan.py \
+            --bin scripts/_artifacts/wcpp-src/build-vulkan/bin \
+            --out dist/whispercpp-vulkan-x64.zip
+
+      # --- Python app -------------------------------------------------------------------
+      - name: Install Python build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+
+      - name: Generate manifest.json
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/make_manifest.py \
+            --version "${{ steps.ver.outputs.version }}" \
+            --release-base "https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}" \
+            --vulkan-zip dist/whispercpp-vulkan-x64.zip \
+            --upstream-tag v1.9.1 \
+            --out mynah/manifest.json \
+            --hash-upstream
+
+      - name: Build app (PyInstaller, onedir/windowed)
+        run: pyinstaller --noconfirm mynah.spec
+
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/Mynah/* -DestinationPath "dist/Mynah-${{ steps.ver.outputs.version }}-portable.zip"
+
+      # --- Inno installer ---------------------------------------------------------------
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} installer.iss
+
+      - name: Stage manifest for upload
+        shell: bash
+        run: cp mynah/manifest.json dist/manifest.json
+
+      # --- publish ----------------------------------------------------------------------
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Mynah-Setup-${{ steps.ver.outputs.version }}.exe
+            dist/Mynah-${{ steps.ver.outputs.version }}-portable.zip
+            dist/whispercpp-vulkan-x64.zip
+            dist/manifest.json
+
+      - name: Upload build artifacts (dry run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mynah-build
+          path: |
+            dist/Mynah-Setup-*.exe
+            dist/Mynah-*-portable.zip
+            dist/whispercpp-vulkan-x64.zip
+            dist/manifest.json

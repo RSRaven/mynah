@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mynah — local push-to-talk voice typing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- waveform mark reused in nav + brand -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="wavemark" viewBox="0 0 32 32">
+    <path d="M2 16 q2 0 3-7 t3 12 t3-16 t3 18 t3-9 t2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <text x="20" y="22" font-family="Space Grotesk, sans-serif" font-size="12" font-weight="700" fill="currentColor">M</text>
+  </symbol>
+</svg>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg class="mark accent"><use href="#wavemark"/></svg>
+      <span><b>My</b><span class="accent">nah</span></span>
+    </a>
+    <div class="links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#why">Why</a>
+      <a href="#">Docs</a>
+      <a href="#" class="btn btn-primary">Download</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-copy">
+      <span class="eyebrow"><span class="dot"></span> 100% offline · no cloud · no telemetry</span>
+      <h1 class="hero-title">Hold a key.<br>Talk. <span class="grad">It's typed.</span></h1>
+      <p class="lede">Local, GPU-accelerated push-to-talk voice typing for Windows. Speak into any
+        app — your terminal, editor, or browser — and the text lands at your cursor. Audio never
+        leaves your machine.</p>
+      <div class="cta-row">
+        <a href="#" class="btn btn-primary btn-lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.5m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download for Windows
+        </a>
+        <a href="#" class="btn btn-ghost btn-lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.3 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.7.3-1.1.6-1.4-2.2-.3-4.6-1.2-4.6-5.1 0-1.1.4-2 1-2.7-.1-.3-.5-1.3.1-2.7 0 0 .8-.3 2.7 1a9 9 0 014.9 0c1.9-1.3 2.7-1 2.7-1 .6 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.8-4.6 5.1.4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10.3 10.3 0 0022 12.3C22 6.6 17.5 2 12 2z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="badges">
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--idle)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linejoin="round"/></svg> On-device Whisper large-v3</span>
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--trans)" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" stroke-linejoin="round"/></svg> Sub-second, resident on GPU</span>
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--load)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg> Auto-detects language</span>
+      </div>
+    </div>
+
+    <!-- self-playing demo -->
+    <div class="demo">
+      <div class="demo-top">
+        <kbd class="key" id="key">F9</kbd>
+        <span class="state-chip" id="chip"><span class="dot" id="chipdot"></span><span id="chiptxt">Idle</span></span>
+      </div>
+      <div class="wave-box"><canvas id="wave"></canvas></div>
+      <div class="editor">
+        <div class="editor-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>~/project — mynah</span></div>
+        <div class="editor-body">
+          <div><span class="gutter">$</span><span class="prompt">claude</span></div>
+          <div><span class="gutter">›</span><span class="typed" id="typed"></span><span class="cursor" id="cursor"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section class="block" id="how">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="kicker">How it works</span>
+      <h2 class="sec">One loop, fully on your machine</h2>
+      <p class="sec-lede">A hotkey or wake word records mic audio, a resident whisper.cpp model
+        transcribes it on the GPU, and the text is pasted at your cursor. The same runtime also
+        handles language detection and voice-activity splitting — there's no second engine.</p>
+    </div>
+    <div class="pipe reveal">
+      <div class="node" data-step="0">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 11h.01M11 11h.01M15 11h.01M8 14h8"/></svg></div>
+        <h4>Hotkey / wake word</h4><p>Hold F9, tap F10, or say "hey mynah".</p>
+      </div>
+      <div class="node" data-step="1">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></div>
+        <h4>Record mic</h4><p>16 kHz mono, only while you hold.</p>
+      </div>
+      <div class="node" data-step="2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 9v6M12 7v10M16 10v4"/></svg></div>
+        <h4>whisper.cpp on GPU</h4><p>large-v3, resident in VRAM.</p>
+      </div>
+      <div class="node" data-step="3">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M4 12h16M4 18h12"/><path d="M18 14l3 3-3 3" /></svg></div>
+        <h4>Paste at cursor</h4><p>Into any focused app, instantly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FEATURES ================= -->
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="kicker">Features</span>
+      <h2 class="sec">Built to stay out of your way</h2>
+    </div>
+    <div class="grid reveal">
+      <div class="card c-green"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linejoin="round"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <h3>Private by design</h3><p>Everything runs on-device. No cloud calls, no account, no telemetry — your voice never leaves the machine.</p></div>
+      <div class="card c-amber"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" stroke-linejoin="round"/></svg></div>
+        <h3>Fast</h3><p>The model stays resident on the GPU, so a short utterance comes back in well under a second.</p></div>
+      <div class="card c-blue"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg></div>
+        <h3>Accurate & multilingual</h3><p>Whisper large-v3 auto-detects the language and can split clips that mix several at once.</p></div>
+      <div class="card c-red"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></div>
+        <h3>Three ways to activate</h3><p>Hold-to-talk, tap-to-toggle, or hands-free wake word — whatever fits the moment.</p></div>
+      <div class="card c-purple"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
+        <h3>Lives in the tray</h3><p>A color-coded tray icon shows state at a glance; everything is tunable in a Settings window.</p></div>
+      <div class="card c-cyan"><div class="cic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6 4.5 2.3 7.1L12 16.6 5.7 21l2.3-7.1-6-4.5h7.6z"/></svg></div>
+        <h3>Free & open source</h3><p>MIT licensed, no paid tier. Runs from a small installer that downloads what it needs on first run.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CUSTOMIZE ================= -->
+<section class="block" id="customize">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="kicker">Make it yours</span>
+      <h2 class="sec">One app, not one setting</h2>
+      <p class="sec-lede">Mynah ships with sensible defaults, but nothing is hard-wired. Swap the
+        GPU backend, pick a bigger or faster model, rebind the keys, change the wake phrase — all
+        from the Settings window, the CLI, or a plain <code>config.toml</code>.</p>
+    </div>
+    <div class="custom-wrap reveal">
+      <div class="opt-grid">
+        <div class="opt">
+          <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--idle)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 9v6M12 7v10M16 10v4"/></svg> Backends</h4>
+          <p>Auto-detected, override anytime.</p>
+          <div class="tags"><span class="tag on">Vulkan</span><span class="tag">CUDA</span><span class="tag">CPU</span></div>
+        </div>
+        <div class="opt">
+          <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--trans)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Models</h4>
+          <p>Trade speed, accuracy & VRAM.</p>
+          <div class="tags"><span class="tag on">large-v3</span><span class="tag">turbo</span><span class="tag">medium</span><span class="tag">small</span></div>
+        </div>
+        <div class="opt">
+          <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--load)" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg> Hotkeys</h4>
+          <p>Rebind push-to-talk & toggle; stack combos.</p>
+          <div class="tags"><span class="tag on">F9</span><span class="tag">F10</span><span class="tag">ctrl+space</span></div>
+        </div>
+        <div class="opt">
+          <h4><svg viewBox="0 0 24 24" fill="none" stroke="#36d68a" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg> Wake phrase</h4>
+          <p>Pick your own + tune sensitivity.</p>
+          <div class="tags"><span class="tag on">"hey mynah"</span><span class="tag">custom</span></div>
+        </div>
+      </div>
+      <div class="code">
+        <div class="editor-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>%APPDATA%\mynah\config.toml</span></div>
+<pre><span class="c"># everything below is optional — these are the defaults</span>
+<span class="h">[model]</span>
+<span class="k">name</span>    = <span class="s">"large-v3"</span>   <span class="c"># or large-v3-turbo / medium / small</span>
+
+<span class="h">[hardware]</span>
+<span class="k">backend</span> = <span class="s">"auto"</span>       <span class="c"># auto | vulkan | cuda | cpu</span>
+
+<span class="h">[hotkey]</span>
+<span class="k">push_to_talk</span> = <span class="s">"f9,ctrl+space"</span>
+<span class="k">toggle</span>       = <span class="s">"f10"</span>
+
+<span class="h">[language]</span>
+<span class="k">mode</span>         = <span class="s">"auto"</span>   <span class="c"># auto-detect per clip</span>
+<span class="k">multilingual</span> = <span class="k">true</span>     <span class="c"># split mixed-language clips</span>
+
+<span class="h">[wakeword]</span>
+<span class="k">phrase</span>      = <span class="s">"hey mynah"</span>
+<span class="k">sensitivity</span> = <span class="s">0.5</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WHY ================= -->
+<section class="block" id="why">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="kicker">Why it's built this way</span>
+      <h2 class="sec">Decisions, with the numbers</h2>
+      <p class="sec-lede">Mynah ships one engine across every platform and defaults to a GPU
+        backend that needs no extra download. Both choices were benchmarked, not guessed.</p>
+    </div>
+    <div class="why-grid reveal">
+      <div class="tbl-card">
+        <div class="hd"><h3>One engine: whisper.cpp</h3><p>The alternative was measured at parity — so we kept the simpler one.</p></div>
+        <table>
+          <tr><th>Engine</th><th>Backends</th><th>Extra GPU download</th></tr>
+          <tr class="win-row"><td>whisper.cpp <span class="pill win">used</span></td><td>CPU · Vulkan · CUDA · Metal</td><td>none (Vulkan/CPU)</td></tr>
+          <tr><td>faster-whisper</td><td>CPU · CUDA</td><td>~1.3 GB cuBLAS/cuDNN</td></tr>
+        </table>
+      </div>
+      <div class="tbl-card">
+        <div class="hd"><h3>GPU backend: Vulkan by default</h3><p>RTX 2080, large-v3, warm short clip. CUDA-parity speed, identical accuracy.</p></div>
+        <table>
+          <tr><th>Backend</th><th>Works on</th><th>Download</th><th>Speed</th></tr>
+          <tr class="win-row"><td>Vulkan <span class="pill def">default</span></td><td>NVIDIA/AMD/Intel</td><td>~74 MB</td><td>sub-second</td></tr>
+          <tr><td>CUDA</td><td>NVIDIA only</td><td>~1.3 GB</td><td>≈ Vulkan</td></tr>
+          <tr><td>CPU</td><td>any machine</td><td>none</td><td>several s</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= GET STARTED ================= -->
+<section class="cta-block">
+  <div class="wrap reveal">
+    <h2>Start dictating in two minutes</h2>
+    <p>Grab the installer or the portable zip. First run detects your hardware and downloads the
+      engine pack and model with a progress bar — then it just lives in your tray.</p>
+    <div class="cta-row">
+      <a href="#" class="btn btn-primary btn-lg">Download for Windows</a>
+      <a href="#" class="btn btn-ghost btn-lg">Run from source</a>
+    </div>
+    <div class="dl-meta">Mynah-Setup-0.2.0.exe · per-user, no admin · or portable .zip</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#"><svg class="mark accent"><use href="#wavemark"/></svg><span><b>My</b><span class="accent">nah</span></span></a>
+    <span class="lic">MIT licensed · local-only · made for people who'd rather talk than type.</span>
+    <div class="links">
+      <a href="#">Docs</a><a href="#">GitHub</a><a href="#">Releases</a><a href="#">License</a>
+    </div>
+  </div>
+</footer>
+
+<script src="hero.js"></script>
+</body>
+</html>

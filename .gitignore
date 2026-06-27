@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+# but track the committed PyInstaller build spec
+!mynah.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling / locks
+.uv/
+*.log
+
+# Models & caches (downloaded at runtime)
+models/
+*.bin
+*.onnx
+.cache/
+
+# Local config & secrets
+config.local.toml
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Icon-design scratch (the shipped icon is drawn in code, not from these PNGs)
+design/
+
+# Benchmark scratch (downloaded binaries, models, audio samples)
+bench/_artifacts/
+bench/samples/
+bench/samples_multi/
+
+# Build output of the (moved) Vulkan build script
+_artifacts/
+scripts/_artifacts/
+
+# Internal planning / dev docs & tooling — kept locally, NOT published to GitHub
+/CLAUDE.md
+/goals/
+/docs/
+/tests/
+/bench/
+/scripts/stage_local_release.py
+/scripts/import_to_hf_cache.py

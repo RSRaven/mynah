@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "version": "0.2.0",
+  "generated": "template — CI (scripts/make_manifest.py) overwrites sha256+size at release time",
+  "release_base": "https://github.com/RSRaven/mynah/releases/download/v0.2.0",
+  "components": {
+    "whispercpp-vulkan": {
+      "kind": "engine",
+      "backend": "vulkan",
+      "url": "https://github.com/RSRaven/mynah/releases/download/v0.2.0/whispercpp-vulkan-x64.zip",
+      "sha256": "",
+      "size": 0,
+      "license": "MIT",
+      "source": "mynah-release",
+      "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend (no upstream Vulkan asset exists)."
+    },
+    "whispercpp-cpu": {
+      "kind": "engine",
+      "backend": "cpu",
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip",
+      "sha256": "",
+      "size": 0,
+      "license": "MIT",
+      "source": "upstream-whisper.cpp",
+      "note": "Upstream CPU build — the no-GPU fallback (single-engine)."
+    },
+    "whispercpp-cuda": {
+      "kind": "engine",
+      "backend": "cuda",
+      "optional": true,
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-cublas-12.4.0-bin-x64.zip",
+      "sha256": "",
+      "size": 0,
+      "license": "MIT + NVIDIA CUDA Toolkit EULA (bundled cuBLAS)",
+      "license_note": "This optional pack bundles NVIDIA cuBLAS, redistributed under NVIDIA's CUDA Toolkit EULA. It is fetched from the upstream whisper.cpp release (NVIDIA's distribution channel); Mynah does not host NVIDIA binaries.",
+      "license_url": "https://docs.nvidia.com/cuda/eula/index.html",
+      "source": "upstream-whisper.cpp",
+      "note": "Optional NVIDIA-only speed upgrade; self-contained cuBLAS — no separate cuDNN/PyPI download."
+    }
+  }
+}

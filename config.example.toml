@@ -1,0 +1,66 @@
+# Mynah example configuration.
+#
+# Copy to your app-data dir to customize (or run `mynah --write-config`):
+#   Windows: %APPDATA%\mynah\config.toml
+#   macOS:   ~/Library/Application Support/mynah/config.toml
+#
+# Any key you omit falls back to its built-in default.
+
+[model]
+engine = "auto"                 # auto | whispercpp — single engine; legacy faster-whisper/cuda/cpu accepted
+name = "large-v3"               # whisper.cpp GGML model: large-v3 | large-v3-turbo | medium | small | ...
+device = "auto"                 # auto | cuda | cpu (also selects GPU vs CPU for the multilingual LID gate)
+# whisper.cpp is the only ASR engine. The GPU backend is set by *which build* you point it
+# at — the default is **Vulkan** for every GPU (NVIDIA/AMD/Intel; no cuBLAS/cuDNN download).
+# CUDA is an optional NVIDIA-only speed upgrade (a different whisper-server build); a CPU
+# build covers machines with no usable GPU. Until auto-download lands, point these at
+# a prebuilt whisper-server build + GGML model, or set env vars MYNAH_WHISPERCPP_DIR /
+# MYNAH_WHISPERCPP_MODEL. Defaults:
+#   %APPDATA%/mynah/engines/whispercpp  and  %APPDATA%/mynah/models/ggml-large-v3.bin
+# whispercpp_dir = ""
+# whispercpp_model = ""
+# compute_type / vad / beam_size are legacy faster-whisper knobs and are ignored by whisper.cpp.
+
+[language]
+mode = "auto"                   # auto | fixed
+fixed = "en"                    # used when mode = fixed
+# Multilingual dictation: on (default) = detect mixed-language clips, split them, and
+# transcribe each part in its own language (single-language clips stay fast; mixed clips
+# take longer). Set false for one language per clip. See README.
+multilingual = true
+
+[hotkey]
+# Two independent triggers (use one or both). Each is a single key or combo,
+# e.g. "f9", "ctrl+space", "ctrl+alt+d". Set to "" to disable that one.
+push_to_talk = "f9"   # hold to record, release to transcribe (walkie-talkie style)
+toggle = "f10"        # tap once to start, tap again to stop (hands-free switch)
+multilingual = ""     # optional: tap to toggle multilingual mode on/off ("" = disabled)
+wakeword = ""         # optional: tap to toggle wake-word listening mode on/off ("" = disabled)
+
+[insertion]
+method = "paste"                # paste | type
+restore_clipboard = true
+
+[audio]
+sample_rate = 16000
+input_device = "default"        # "default" or a device index/name (see --list-devices)
+
+[ux]
+sound_cues = true
+cue_device = "default"          # output device for cues; "default" or index/name
+# Cue sounds: Windows uses built-in notification .wav files; macOS/Linux fall back to
+# synthesized tones. Point these at any .wav to override (recommended on non-Windows).
+cue_start_file = ""
+cue_stop_file = ""
+min_clip_ms = 300               # ignore accidental taps shorter than this
+
+[wakeword]
+# Hands-free "listening mode", OFF by default. When enabled, say the wake phrase
+# (then pause) to start dictation without touching a hotkey — a tiny, VAD-gated spotter
+# listens on the CPU; the full model only runs on your dictation. Push-to-talk stays the
+# primary trigger. The mic is read continuously *locally* while this is on (never uploaded).
+enabled = false
+phrase = "hey mynah"             # a carrier word ("hey …") is the most reliable; bare words mis-hear
+sensitivity = 0.5              # 0..1 — higher triggers more easily (and matches more loosely)
+silence_ms = 900              # "stop delay": finish a phrase after this much trailing silence (max ~3000)
+max_seconds = 30              # cap a single hands-free dictation

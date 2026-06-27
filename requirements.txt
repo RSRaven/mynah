@@ -1,0 +1,32 @@
+# Mynah MVP (Windows + NVIDIA) — see pyproject.toml for the authoritative list.
+#
+# Quick start:
+#   python -m venv .venv && .venv\Scripts\activate
+#   pip install -r requirements.txt
+#   mynah            # or: python -m mynah
+
+# ASR engine: whisper.cpp (single engine) — a prebuilt whisper-server +
+# whisper.dll (Vulkan / CUDA / CPU) provisioned out of band, NOT a pip package. The
+# LID + VAD bind that whisper.dll in-process via ctypes (stdlib), so there's no
+# CTranslate2 / faster-whisper / nvidia-*-cu12 to install here.
+
+# Audio + arrays
+sounddevice>=0.4
+numpy
+
+# Global hotkey + keystroke simulation
+pynput>=1.7
+
+# Clipboard (paste-insertion + restore)
+pyperclip>=1.8
+
+# System-tray UI (Phase 2): tray icon + menu; Pillow draws the mic glyph.
+pystray>=0.19
+Pillow>=9.0
+
+# Model manager: GGML weights via the shared Hugging Face cache (resumable,
+# sha256-verified, deduped across apps). Pulls `requests`.
+huggingface_hub>=0.23
+
+# TOML reader fallback for Python < 3.11
+tomli>=2.0; python_version < "3.11"
