@@ -1,0 +1,53 @@
+/* Mynah docs theme — brand periwinkle accent + lifecycle palette, applied to Starlight.
+   Brand mark = a mynah (mimic bird) with an audio waveform fused into the wing.
+   Lifecycle palette mirrors the app's real tray states. */
+
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+:root {
+  /* theme-agnostic — lifecycle palette + fonts (shared with the landing page) */
+  --mynah-idle: #5b7bf0; /* brand periwinkle — idle */
+  --mynah-rec: #ff4d5e; /* recording */
+  --mynah-trans: #ffb44d; /* transcribing */
+  --mynah-load: #b06cff; /* loading */
+
+  --sl-font: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+/* Dark theme (default). Scoped to "not light" so these dark backgrounds never leak
+   into the light theme — putting them on bare :root was the light-mode bug. */
+:root:not([data-theme='light']) {
+  --sl-color-accent-low: #1b274f;
+  --sl-color-accent: #4d6fe6;
+  --sl-color-accent-high: #c3cefe;
+
+  --sl-color-bg: #070a12;
+  --sl-color-bg-nav: rgba(7, 10, 18, 0.6);
+  --sl-color-bg-sidebar: #080c16;
+}
+
+/* Light theme — accent only; let Starlight supply its own light backgrounds. */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dde3ff;
+  --sl-color-accent: #3c54d4;
+  --sl-color-accent-high: #1b2358;
+}
+
+/* Make the rounded app-icon logo sit nicely in the header */
+.site-title img,
+header .site-title img {
+  border-radius: 7px;
+}
+
+/* Brand-tinted inline code + headings feel */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  letter-spacing: -0.01em;
+}
