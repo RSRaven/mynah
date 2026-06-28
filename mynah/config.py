@@ -63,7 +63,9 @@ DEFAULTS: dict = {
         "phrase": "hey mynah",       # say this to start dictating; a carrier word ("hey") is most reliable
         "sensitivity": 0.5,        # 0..1 — higher = easier to trigger (and looser phrase match)
         "silence_ms": 900,         # "stop delay": end an utterance after this much trailing silence
-        "max_seconds": 30,         # cap a single hands-free dictation
+        "max_seconds": 120,        # safety cap on one hands-free dictation; it normally ends on
+                                   # silence (stop delay) well before this — not a fixed timer
+
     },
 }
 
@@ -134,7 +136,7 @@ enabled = false
 phrase = "hey mynah"             # a carrier word ("hey …") is the most reliable; bare words mis-hear
 sensitivity = 0.5              # 0..1 — higher triggers more easily (and matches more loosely)
 silence_ms = 900              # "stop delay": finish a phrase after this much trailing silence (max ~3000)
-max_seconds = 30              # cap a single hands-free dictation
+max_seconds = 120             # safety cap on one hands-free dictation (it ends on silence first)
 """
 
 

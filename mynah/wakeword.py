@@ -23,6 +23,7 @@ Phrase matching is deliberately lenient: a tiny model mishears an unusual word l
 from __future__ import annotations
 
 import difflib
+import os
 import queue
 import re
 import threading
@@ -151,6 +152,12 @@ class Endpointer:
     def set_silence_ms(self, silence_ms: float) -> None:
         self.silence_frames = max(1, int(silence_ms / 1000 * self.sr / self.frame))
 
+    def set_max_s(self, max_s: float) -> None:
+        """Hard cap on a single utterance's length. Short while spotting the wake phrase (so
+        steady noise is chopped and checked often); long while capturing dictation (so a real
+        utterance ends on silence, not this cap)."""
+        self.max_frames = max(1, int(max_s * self.sr / self.frame))
+
     def process(self, samples) -> list[np.ndarray]:
         buf = np.asarray(samples, dtype=np.float32).reshape(-1)
         if len(self._tail):
@@ -259,6 +266,14 @@ class TinyWhisperSpotter(WakeWordSpotter):
 _WAKE = "wake"          # listening for the wake phrase
 _CAPTURE = "capture"    # wake heard; recording the dictation utterance
 
+# The wake phrase is short, so detect it with a brief trailing pause for a snappy trigger —
+# *independently* of the (often much longer) dictation "stop delay". Sharing one silence window
+# meant raising the stop delay so dictation wasn't cut off also made the wake word feel slow.
+_WAKE_SILENCE_MS = 500
+# Likewise cap a *wake-phrase* candidate short so steady noise is chopped and re-checked often,
+# rather than growing toward the long dictation cap (which would delay detection during noise).
+_WAKE_MAX_S = 4.0
+
 
 class WakeWordListener:
     """Owns a continuous mic stream and drives the wake → dictate state machine.
@@ -298,6 +313,9 @@ class WakeWordListener:
         self.max_dictation_s = float(max_dictation_s)
         self.wake_timeout_s = float(wake_timeout_s)
         self._log = log
+        # Set MYNAH_WAKE_DEBUG=1 to log every VAD-detected candidate (transcript + score),
+        # not just successful matches — the only way to see why a phrase isn't triggering.
+        self._debug = bool(os.environ.get("MYNAH_WAKE_DEBUG"))
 
         self._audio_q: "queue.Queue[np.ndarray | None]" = queue.Queue()
         self._stream = None
@@ -391,7 +409,8 @@ class WakeWordListener:
 
         self._ready = True
         self._log(f"Wake word: listening for \"{self.phrase}\" "
-                  f"({self.spotter.description}).")
+                  f"(sensitivity {self.sensitivity:.2f}, stop delay {self.silence_ms} ms, "
+                  f"max dictation {self.max_dictation_s:.0f}s; {self.spotter.description}).")
         if self._on_ready is not None:
             self._on_ready(True, "")
         try:
@@ -421,12 +440,30 @@ class WakeWordListener:
         if self._running:
             self._audio_q.put(indata.reshape(-1).copy())
 
+    def _drain_audio_q(self) -> None:
+        """Drop all currently-buffered mic audio (used while paused, so we don't come back to a
+        backlog of stale sound), but keep the stop sentinel so shutdown still unblocks the loop."""
+        saw_sentinel = False
+        try:
+            while True:
+                if self._audio_q.get_nowait() is None:
+                    saw_sentinel = True
+        except queue.Empty:
+            pass
+        if saw_sentinel:
+            self._audio_q.put(None)
+
     # --- the state machine -----------------------------------------------------------------
 
     def _loop(self) -> None:
+        # Wake-phrase detection uses a short fixed silence (snappy trigger); dictation capture
+        # uses the configured stop delay. Never let the wake pause exceed the dictation one.
+        def wake_silence() -> int:
+            return min(_WAKE_SILENCE_MS, self.silence_ms)
+
         ep = Endpointer(samplerate=self.samplerate, threshold=rms_threshold(self.sensitivity),
-                        onset_ratio=onset_ratio(self.sensitivity), silence_ms=self.silence_ms,
-                        min_speech_ms=self.min_speech_ms, max_s=self.max_dictation_s)
+                        onset_ratio=onset_ratio(self.sensitivity), silence_ms=wake_silence(),
+                        min_speech_ms=self.min_speech_ms, max_s=_WAKE_MAX_S)
         state = _WAKE
         capture_started = 0.0
 
@@ -450,16 +487,27 @@ class WakeWordListener:
                     elif self._on_abort is not None:
                         self._on_abort()
             if self._is_blocked():
-                # A manual recording is happening — ignore audio + reset so we don't capture
-                # the same speech twice or trip on it.
+                # A manual recording or a transcription is in progress — don't spot now (it would
+                # fight the main model for the GPU). Reset, and drop the audio buffered while busy
+                # so we resume on fresh sound instead of a stale backlog (what made it go deaf for
+                # ~15s after a long clip).
                 if state != _WAKE or ep.in_speech:
                     ep.reset()
                     state = _enter(_WAKE)
+                self._drain_audio_q()
                 continue
-            # Apply live sensitivity / stop-delay changes (Settings sliders) on the fly.
+            # Apply live sensitivity / stop-delay changes (Settings sliders) on the fly. Both the
+            # silence window and the length cap depend on the phase: short while spotting the wake
+            # phrase (snappy + noise-resistant), full while capturing dictation (stop on silence,
+            # not a timer).
             ep.set_threshold(rms_threshold(self.sensitivity))
             ep.onset_ratio = onset_ratio(self.sensitivity)
-            ep.set_silence_ms(self.silence_ms)
+            if state == _WAKE:
+                ep.set_silence_ms(wake_silence())
+                ep.set_max_s(_WAKE_MAX_S)
+            else:
+                ep.set_silence_ms(self.silence_ms)
+                ep.set_max_s(self.max_dictation_s)
             for utt in ep.process(chunk):
                 if state == _WAKE:
                     if self._is_wake(utt):
@@ -483,18 +531,28 @@ class WakeWordListener:
         self._capturing = False
 
     def _is_wake(self, audio: np.ndarray) -> bool:
-        """True if a (short) candidate utterance transcribes to the wake phrase."""
-        if len(audio) > self.max_wake_s * self.samplerate:
-            return False  # too long to be just the wake word — ignore
+        """True if a candidate utterance transcribes to the wake phrase.
+
+        The wake phrase always comes *first*, so for an over-long utterance (e.g. steady
+        background noise kept the VAD open past ``max_wake_s``) we transcribe just the
+        leading window rather than dropping it — otherwise a noisy room never triggers.
+        """
+        dur = len(audio) / self.samplerate
+        max_len = int(self.max_wake_s * self.samplerate)
+        clipped = len(audio) > max_len
+        clip = audio[:max_len] if clipped else audio
         try:
-            text = self.spotter.transcribe(audio)
+            text = self.spotter.transcribe(clip)
         except Exception as e:
             self._log(f"! wake spotter transcribe failed: {e}")
             return False
-        if not text:
-            return False
         score = phrase_score(text, self.phrase)
-        hit = score >= match_threshold(self.sensitivity)
-        if hit:
+        thr = match_threshold(self.sensitivity)
+        hit = score >= thr
+        if self._debug:
+            tag = " [clipped]" if clipped else ""
+            self._log(f'Wake?{tag} {dur:.1f}s heard "{text}" score {score:.2f} '
+                      f'vs "{self.phrase}" (need {thr:.2f}) → {"HIT" if hit else "no"}')
+        elif hit:
             self._log(f'Wake word heard: "{text}" (score {score:.2f}) → dictate.')
         return hit
