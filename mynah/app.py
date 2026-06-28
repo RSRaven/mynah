@@ -802,9 +802,9 @@ class MynahApp:
                 on_dictation=self.controller.on_wakeword_clip,
                 on_abort=self.controller.on_wakeword_abort,
                 on_ready=self._on_wakeword_ready,
-                is_blocked=lambda: self.controller.recorder.is_recording,
+                is_blocked=self.controller.is_busy,
                 silence_ms=int(wk.get("silence_ms", 900)),
-                max_dictation_s=float(wk.get("max_seconds", 30)),
+                max_dictation_s=float(wk.get("max_seconds", 120)),
             )
             listener.start()
             self._wakeword = listener

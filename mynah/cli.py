@@ -309,9 +309,9 @@ def run_headless(cfg: dict, args: argparse.Namespace) -> int:
                 on_wake=controller.on_wakeword_begin,
                 on_dictation=controller.on_wakeword_clip,
                 on_abort=controller.on_wakeword_abort,
-                is_blocked=lambda: controller.recorder.is_recording,
+                is_blocked=controller.is_busy,
                 silence_ms=int(wk.get("silence_ms", 900)),
-                max_dictation_s=float(wk.get("max_seconds", 30)))
+                max_dictation_s=float(wk.get("max_seconds", 120)))
             wake_listener.start()
         except Exception as e:
             print(f"X couldn't start wake word: {e}")

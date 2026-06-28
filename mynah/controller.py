@@ -97,6 +97,9 @@ class Controller:
         self._control_thread: threading.Thread | None = None
         self._worker_thread: threading.Thread | None = None
         self._running = False
+        # True while a clip is being transcribed — lets the wake-word spotter pause itself so
+        # it doesn't fight the main model for the GPU (or back up its mic queue) meanwhile.
+        self._transcribing = False
 
     # --- status -------------------------------------------------------------
 
@@ -118,6 +121,14 @@ class Controller:
 
     def _wake_capturing(self) -> bool:
         return self.wake_is_capturing is not None and self.wake_is_capturing()
+
+    def is_busy(self) -> bool:
+        """True while the main ASR pipeline is occupied — actively recording, transcribing, or
+        with clips still queued. The wake-word spotter checks this to pause itself so it never
+        contends for the GPU (which slowed transcription) or lets its mic queue back up with
+        stale audio (which made the wake word go deaf for ~15s after a long clip)."""
+        return (self.recorder.is_recording or self._transcribing
+                or not self._audio_q.empty())
 
     def on_activate(self) -> None:
         # If a wake-word dictation is in progress, F9 *stops* it (and we swallow the matching
@@ -230,6 +241,7 @@ class Controller:
                 continue
             try:
                 t0 = time.time()
+                self._transcribing = True
                 with self._model_lock:
                     if self.multilingual and self._multi is not None and self._multi.ready:
                         # Coordinator holds the lock for the whole (multi-pass) clip, so a
@@ -254,6 +266,7 @@ class Controller:
                 self._cue("error")
                 print(f"! transcription/insert failed: {e}")
             finally:
+                self._transcribing = False
                 # Back to idle once the backlog is drained and we're not recording
                 # the next clip (don't stomp a RECORDING status the user just started).
                 if self._audio_q.empty() and not self.recorder.is_recording:
