@@ -30,10 +30,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: site/package-lock.json
-      - run: npm ci
+      # npm install (not ci): the lockfile is generated on Windows and omits sharp's
+      # Linux-only optional deps, which makes `npm ci` fail on the ubuntu runner.
+      - run: npm install --no-audit --no-fund
       - name: Build with Astro
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
