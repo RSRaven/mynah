@@ -141,6 +141,7 @@ class Endpointer:
         self._pre: list[np.ndarray] = []
         self._tail = np.zeros(0, np.float32)
         self._noise = self.noise_floor_min
+        self._speech_peak = 0.0  # loudest frame in the current utterance (for end-of-speech)
 
     @property
     def in_speech(self) -> bool:
@@ -187,16 +188,29 @@ class Endpointer:
                 self._pre = []
                 self._speech_frames = 1
                 self._silence_run = 0
+                self._speech_peak = rms
         else:
-            # Hysteresis: a lower bar to *stay* in speech, so soft syllables/short gaps don't
-            # end the phrase prematurely.
-            offset = max(self.threshold * 0.5, self._noise * self.offset_ratio)
+            # End-of-speech bar. The old purely-noise-relative bar (noise * ratio) broke at high
+            # sensitivity: the ratio shrank, ambient room tone stayed above it, and silence was
+            # never detected (the utterance ran to the max-length cap — the "records forever"
+            # bug). Decouple it from sensitivity with a **peak-relative** bar: silence = clearly
+            # quieter than the speech we just heard. Combined (max) with the adaptive noise bar
+            # and an absolute floor so it's robust across mics and noise levels.
+            self._speech_peak = max(self._speech_peak, rms)
+            offset = max(self.threshold * 0.5,
+                         self._noise * self.offset_ratio,
+                         self._speech_peak * 0.18)
             self._utt.append(frame)
             if rms > offset:
                 self._speech_frames += 1
                 self._silence_run = 0
             else:
                 self._silence_run += 1
+                # Keep tracking ambient level during the trailing pause so a slowly-rising room
+                # tone can't masquerade as ongoing speech.
+                self._noise = max(self.noise_floor_min,
+                                  (1.0 - self.noise_alpha) * self._noise
+                                  + self.noise_alpha * rms)
             if self._silence_run >= self.silence_frames or len(self._utt) >= self.max_frames:
                 if self._speech_frames >= self.min_speech_frames:
                     done.append(np.concatenate(self._utt).astype(np.float32))
@@ -209,6 +223,7 @@ class Endpointer:
         self._speech_frames = 0
         self._silence_run = 0
         self._pre = []
+        self._speech_peak = 0.0
 
     def flush(self) -> "np.ndarray | None":
         """Finish the in-progress utterance *now* (an external 'stop', e.g. a hotkey ending a
@@ -273,6 +288,11 @@ _WAKE_SILENCE_MS = 500
 # Likewise cap a *wake-phrase* candidate short so steady noise is chopped and re-checked often,
 # rather than growing toward the long dictation cap (which would delay detection during noise).
 _WAKE_MAX_S = 4.0
+# After the wake phrase matches we play a start cue; this is how long we mute + discard the mic
+# afterwards so the cue isn't captured as the start of dictation. The macOS start cue is the
+# synthesized rising tone (~0.24s, see cues._synth) — 0.35s covers it with a small tail margin.
+# When sound cues are off this drops to 0 (the listener is told there's nothing to swallow).
+_POST_WAKE_MUTE_S = 0.35
 
 
 class WakeWordListener:
@@ -296,7 +316,8 @@ class WakeWordListener:
                  is_blocked: Callable[[], bool] | None = None,
                  silence_ms: int = 900, min_speech_ms: int = 200,
                  max_wake_s: float = 3.0, max_dictation_s: float = 30.0,
-                 wake_timeout_s: float = 6.0, log: Callable[[str], None] = print) -> None:
+                 wake_timeout_s: float = 6.0, post_wake_mute_s: float = _POST_WAKE_MUTE_S,
+                 log: Callable[[str], None] = print) -> None:
         self.spotter = spotter
         self.phrase = phrase
         self.sensitivity = sensitivity
@@ -311,6 +332,9 @@ class WakeWordListener:
         self.min_speech_ms = int(min_speech_ms)
         self.max_wake_s = float(max_wake_s)
         self.max_dictation_s = float(max_dictation_s)
+        # How long to mute+discard the mic right after the wake match, to swallow the start cue.
+        # Set to 0 when sound cues are off (nothing to swallow — listen immediately).
+        self.post_wake_mute_s = float(post_wake_mute_s)
         self.wake_timeout_s = float(wake_timeout_s)
         self._log = log
         # Set MYNAH_WAKE_DEBUG=1 to log every VAD-detected candidate (transcript + score),
@@ -512,10 +536,20 @@ class WakeWordListener:
                 if state == _WAKE:
                     if self._is_wake(utt):
                         state = _enter(_CAPTURE)
-                        capture_started = time.time()
-                        ep.reset()
                         if self._on_wake is not None:
-                            self._on_wake()
+                            self._on_wake()   # plays the "start" cue (if sound is on)
+                        # The start cue is still going *into the mic stream*. If we start
+                        # capturing immediately the cue gets recorded and transcribed as junk
+                        # (e.g. "*phone rings*"). Wait out the cue, then DISCARD everything
+                        # captured up to now so dictation begins on a clean buffer — i.e. listen
+                        # only *after* the cue. With sound off, post_wake_mute_s is 0: we still
+                        # drain the wake phrase itself but don't wait.
+                        if self.post_wake_mute_s > 0:
+                            time.sleep(self.post_wake_mute_s)
+                        self._drain_audio_q()
+                        ep.reset()
+                        capture_started = time.time()
+                        break  # don't process more utterances from this (pre-cue) chunk
                 else:  # _CAPTURE: this utterance is the dictation
                     state = _enter(_WAKE)
                     ep.reset()

@@ -43,6 +43,7 @@ VENDOR_NAMES = {
 # Backends understood by the engine selector (see transcriber.build_transcriber).
 BACKEND_VULKAN = "vulkan"  # whisper.cpp Vulkan — DEFAULT GPU backend (NVIDIA/AMD/Intel)
 BACKEND_CUDA = "cuda"      # whisper.cpp CUDA — optional NVIDIA-only speed upgrade
+BACKEND_METAL = "metal"    # whisper.cpp Metal — DEFAULT GPU backend on Apple Silicon
 BACKEND_CPU = "cpu"
 
 
@@ -58,7 +59,7 @@ class GpuInfo:
 
     @property
     def has_gpu(self) -> bool:
-        return self.vendor in ("nvidia", "amd", "intel")
+        return self.vendor in ("nvidia", "amd", "intel", "apple")
 
 
 # --------------------------------------------------------------------------- NVIDIA / NVML
@@ -282,11 +283,45 @@ def _probe_wmi() -> GpuInfo | None:
                    source="wmi", devices=devices)
 
 
+# ------------------------------------------------------------------------ macOS (Apple GPU)
+
+def _probe_apple() -> GpuInfo | None:
+    """Apple Silicon via ``sysctl``. The GPU is the integrated Apple GPU (Metal); memory is
+    **unified** (CPU+GPU share it), so ``hw.memsize`` is the right ceiling for model sizing.
+    Returns None on Intel Macs (no Apple GPU → fall through to CPU)."""
+    import subprocess
+
+    def _sysctl(key: str) -> str:
+        try:
+            return subprocess.run(["sysctl", "-n", key], capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+        except Exception:
+            return ""
+
+    # arm64 only — Apple Silicon. Intel Macs have no Metal-class Apple GPU we target.
+    if _sysctl("hw.optional.arm64") != "1" and "Apple" not in _sysctl("machdep.cpu.brand_string"):
+        return None
+    chip = _sysctl("machdep.cpu.brand_string") or "Apple Silicon"
+    vram_mb = 0
+    memsize = _sysctl("hw.memsize")
+    if memsize.isdigit():
+        vram_mb = int(int(memsize) // (1024 * 1024))  # unified memory, in MB
+    return GpuInfo(vendor="apple", name=chip, vram_mb=vram_mb, source="sysctl",
+                   devices=[{"vendor": "apple", "name": chip, "vram_mb": vram_mb}])
+
+
 # ----------------------------------------------------------------------------------- main
 
 def probe_gpu() -> GpuInfo:
     """Detect the primary GPU. Never raises — returns a CPU GpuInfo if nothing is found."""
-    if sys.platform == "win32":
+    if sys.platform == "darwin":
+        try:
+            info = _probe_apple()
+        except Exception:
+            info = None
+        if info and info.has_gpu:
+            return info
+    elif sys.platform == "win32":
         for fn in (_probe_nvml, _probe_vulkan, _probe_wmi):
             try:
                 info = fn()
@@ -294,7 +329,7 @@ def probe_gpu() -> GpuInfo:
                 info = None
             if info and info.has_gpu:
                 return info
-    # macOS/Linux GPU branches land in later phases; CPU is the universal floor.
+    # Linux GPU branches land in a later phase; CPU is the universal floor.
     return GpuInfo(vendor=None, name="CPU", vram_mb=0, source="none")
 
 
@@ -316,21 +351,26 @@ def recommend_model(vram_mb: int, has_gpu: bool) -> str:
 def cuda_is_optional(info: GpuInfo) -> bool:
     """True if the CUDA pack is worth *offering* as an optional upgrade — i.e. an NVIDIA
     GPU. Vulkan is the default everywhere; CUDA is a setup-time opt-in
-    on NVIDIA for users who want the last few % of speed (and accept the ~1.3 GB download)."""
+    on NVIDIA for users who want the last few % of speed (and accept the ~1.3 GB download).
+    Never on Apple (Metal is the only GPU backend there)."""
     return info.vendor == "nvidia"
 
 
 def recommend_backend(info: GpuInfo | None = None) -> tuple[str, str, str]:
     """Return ``(backend, model, reason)`` for the detected hardware.
 
-    backend ∈ {``vulkan``, ``cpu``}. **Vulkan is the default GPU backend for every vendor**
-    (NVIDIA, AMD, Intel) — one whisper.cpp build, no cuBLAS/cuDNN download (validated
-    at CUDA parity on the RTX 2080). No GPU -> CPU. On NVIDIA the optional
-    CUDA pack can still be installed at setup (see :func:`cuda_is_optional`); the caller may
-    also override the backend in config / onboarding.
+    backend ∈ {``vulkan``, ``metal``, ``cpu``}. **Vulkan is the default GPU backend for every
+    PC vendor** (NVIDIA, AMD, Intel); **Metal is the default on Apple Silicon** (unified
+    memory). One whisper.cpp build per backend, no cuBLAS/cuDNN download. No GPU -> CPU. On
+    NVIDIA the optional CUDA pack can still be installed at setup (see
+    :func:`cuda_is_optional`); the caller may also override the backend in config / onboarding.
     """
     info = info or probe_gpu()
     model = recommend_model(info.vram_mb, info.has_gpu)
+    if info.vendor == "apple":
+        mem = f"{info.vram_mb} MB unified" if info.vram_mb else "memory unknown"
+        return (BACKEND_METAL, model,
+                f"Apple Silicon ({info.name}, {mem}) -> whisper.cpp Metal")
     vram = f"{info.vram_mb} MB" if info.vram_mb else "VRAM unknown"
     if info.has_gpu:
         extra = "  (CUDA pack optional for max speed)" if cuda_is_optional(info) else ""

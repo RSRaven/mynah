@@ -1,6 +1,6 @@
 # Mynah
 
-**Local, GPU-accelerated push-to-talk voice typing for Windows** — like SuperWhisper /
+**Local, GPU-accelerated push-to-talk voice typing for Windows and macOS** — like SuperWhisper /
 MacWhisper, but **free, open-source, and fully offline**. Hold a hotkey (or say a wake word),
 talk, and the transcribed text is inserted at your cursor — in the terminal, your editor, the
 browser, anywhere. No cloud, no account, no per-word cost. Audio never leaves your machine.
@@ -32,6 +32,29 @@ page:
 small engine pack (~74 MB) and the speech model with a progress bar. After that it lives in
 the tray and starts quietly. Everything is downloaded on demand, so the installer stays small.
 
+## Install (macOS — Apple Silicon)
+
+Grab **`Mynah-X.Y.Z-macos-arm64.zip`** from the
+[**Releases**](https://github.com/RSRaven/mynah/releases) page, unzip it, and move
+**`Mynah.app`** to `/Applications`. Apple Silicon (M1/M2/M3/…) only for now.
+
+> The app is **unsigned** (notarization is deferred), so Gatekeeper blocks it on first launch.
+> Either **right-click the app → Open** (then confirm once), or run:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Mynah.app
+> ```
+
+Mynah is a **menu-bar** app (no Dock icon). On first run it downloads the **Metal** engine pack
++ the speech model, then sits in the menu bar. macOS will ask for three permissions the core
+loop needs — grant each in **System Settings → Privacy & Security**:
+
+- **Microphone** — to hear you (prompts automatically on first capture).
+- **Input Monitoring** — to detect the push-to-talk hotkey.
+- **Accessibility** — to paste the transcribed text (Cmd+V).
+
+Without these the app *silently* does nothing. Run `mynah --permissions` (from a source
+install) to print the current grant status and the exact panes to open.
+
 ### Run from source (any OS with Python 3.10+)
 
 ```bash
@@ -40,9 +63,60 @@ pip install -e .
 mynah
 ```
 
-You also need a `whisper.cpp` build (whisper-server + whisper.dll) and a GGML model. On a
-normal install the app downloads these for you; to point at your own, set
+You also need a `whisper.cpp` build (whisper-server + the whisper shared lib) and a GGML model.
+On a normal install the app downloads these for you; to point at your own, set
 `MYNAH_WHISPERCPP_DIR` (the build dir) and `MYNAH_WHISPERCPP_MODEL` (a `ggml-*.bin`).
+
+On **macOS** the tray/menu-bar + hotkey backends need pyobjc, and the Settings window needs
+Tk:
+
+```bash
+brew install python-tk@3.12
+pip install -e . pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices
+```
+
+### Build the macOS app locally
+
+Produces the same `Mynah.app` the Releases page ships. Needs Python 3.12, CMake, and the Xcode
+command-line tools (for the Metal whisper.cpp build).
+
+```bash
+brew install cmake python@3.12 python-tk@3.12
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e . pyinstaller pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices
+
+# 1) Build + pack the Metal engine pack (Mynah-hosted; no upstream Metal asset exists)
+bash scripts/build_wcpp_metal.sh
+python scripts/pack_metal.py \
+  --bin scripts/_artifacts/wcpp-src/build-metal/bin \
+  --out dist/whispercpp-metal-arm64.zip
+
+# 2) Build the .app and ad-hoc sign it (CI ships this — unsigned distribution)
+pyinstaller --noconfirm mynah.spec        # -> dist/Mynah.app
+codesign -s - --deep --force dist/Mynah.app
+```
+
+`Mynah.app` still fetches the engine pack + model on first run, so the build stays small. It runs
+as a **menu-bar agent** (`LSUIElement`, no Dock icon); grant Microphone / Input Monitoring /
+Accessibility on first run (see the [macOS install steps](#install-macos--apple-silicon) above).
+
+> **Iterating on the app? Use a stable self-signed certificate.** macOS ties privacy grants
+> (Mic / Input Monitoring / Accessibility) to the app's **code identity**. Ad-hoc signing
+> (`codesign -s -`) produces a *new* identity on every build, so each rebuild forces you to
+> re-grant. Sign with a stable self-signed cert instead and you grant **once**:
+>
+> ```bash
+> # one-time: create a self-signed code-signing cert and trust it
+> #   Keychain Access → Certificate Assistant → Create a Certificate…
+> #     Name: "Mynah Dev Signing"  ·  Identity Type: Self Signed Root
+> #     Certificate Type: Code Signing  ·  (then set it to "Always Trust" for code signing)
+> # after each build, sign with it (same identity every time):
+> codesign -s "Mynah Dev Signing" --deep --force dist/Mynah.app
+> ```
+>
+> This is a **local dev convenience only** — it is not committed and CI does not use it. The
+> published release is ad-hoc signed (unsigned distribution), so end users grant once per
+> install (their copy is never rebuilt, so the grant sticks).
 
 ### Build the Windows app locally
 
@@ -52,7 +126,7 @@ Produces the same portable build (and installer) the Releases page ships. Needs 
 ```powershell
 pip install -e . pyinstaller
 pyinstaller mynah.spec                      # -> dist\Mynah\Mynah.exe (portable build)
-iscc /DMyAppVersion=0.3.0 installer.iss       # optional -> Mynah-Setup-0.3.0.exe
+iscc /DMyAppVersion=0.4.0 installer.iss       # optional -> Mynah-Setup-0.4.0.exe
 ```
 
 `Mynah.exe` still fetches the engine pack + model on first run, so the build stays small.
@@ -65,10 +139,19 @@ Visual Studio 2022 Build Tools + the Vulkan SDK — you don't need that just to 
 
 After setup the model loads and stays resident. Then:
 
+Default hotkeys differ by OS (Windows uses the free F-key row; macOS uses Space chords because
+the F-row there needs Fn and common chords collide with app shortcuts). Change them anytime in
+Settings.
+
+| Action | Windows | macOS |
+|---|---|---|
+| **Push-to-talk** | **Hold `F9`** | **Hold `Cmd+Shift+Space`** |
+| **Toggle** (tap on/off) | **Tap `F10`** | **Tap `Ctrl+Shift+Space`** |
+
 | Action | How |
 |---|---|
-| **Push-to-talk** | **Hold `F9`**, speak, release — text is pasted at the cursor. |
-| **Toggle** | **Tap `F10`** to start, tap again to stop (hands-free, no holding). |
+| **Push-to-talk** | Hold the key, speak, release — text is pasted at the cursor. |
+| **Toggle** | Tap to start, tap again to stop (hands-free, no holding). |
 | **Wake word** | Turn on *Listening mode* (below), say **"hey mynah"**, pause, then dictate. |
 | **Settings / model / language / hotkeys** | Left-click the tray icon (or right-click → **Settings…**). |
 | **Quit** | Right-click the tray icon → **Quit**. |
@@ -86,7 +169,8 @@ the phrase, pause, and dictate**:
   bare word is mis-heard more often. Change it in Settings or with `--wake-phrase "…"`.
 - **Sensitivity** controls how easily it triggers (it also self-calibrates to your mic).
   **Stop delay** is how long a pause ends a phrase — raise it if it cuts you off.
-- While it's recording your dictation, **F9 / F10 stops it early** and types what you said.
+- While it's recording your dictation, **your push-to-talk / toggle hotkey stops it early** and
+  types what you said.
 - Push-to-talk stays the primary trigger; the wake word is an add-on. The mic is read
   continuously **on your machine only** while it's on.
 
@@ -187,7 +271,8 @@ language detector and the voice-activity splitter used for multilingual mode and
 
 | Backend | Works on | Extra download | Speed | Accuracy (WER) |
 |---|---|---|---|---|
-| **Vulkan** (default) | NVIDIA / AMD / Intel | none — engine ~74 MB; loader ships with the driver | sub-second | 0.012 |
+| **Vulkan** (default, PC) | NVIDIA / AMD / Intel | none — engine ~74 MB; loader ships with the driver | sub-second | 0.012 |
+| **Metal** (default, Mac) | Apple Silicon | none — engine ~4 MB; uses the OS Metal stack | sub-second | 0.012 |
 | **CUDA** (optional) | NVIDIA only | ~1.3 GB (cuBLAS + cuDNN) | sub-second (≈ Vulkan) | 0.012 |
 | **CPU** (fallback) | any machine | none | several seconds (use a smaller model) | ≈ 0.012 |
 
@@ -204,11 +289,18 @@ download — which is why it's the default. CUDA remains available for cards whe
 - **Wake word too eager / not triggering:** adjust **Sensitivity**; raise **Stop delay** if it
   cuts you off mid-phrase.
 - **No GPU / wrong backend:** **Settings → Backend** overrides detection (Auto / Vulkan /
-  NVIDIA CUDA / CPU). CPU always works as a fallback (pick a smaller model like `small`).
+  NVIDIA CUDA / CPU on PC; Auto / Metal / CPU on Mac). CPU always works as a fallback (pick a
+  smaller model like `small`).
 - **Paste doesn't land in some terminals:** a few use Ctrl+Shift+V — set `method = "type"` in
   `[insertion]` to simulate keystrokes instead.
 - **First transcription is slow (~2 s), later ones ~1 s:** normal GPU warm-up; the model stays
   resident afterwards.
+- **(macOS) Nothing happens when you hold the hotkey or it won't paste:** grant **Input
+  Monitoring** + **Accessibility** in System Settings → Privacy & Security (and **Microphone**
+  for capture). `mynah --permissions` prints what's missing. After a rebuild, re-grant if the
+  app's signature changed.
+- **(macOS) "Mynah.app is damaged / can't be opened":** it's just unsigned — right-click →
+  **Open**, or `xattr -dr com.apple.quarantine /Applications/Mynah.app`.
 
 ---
 

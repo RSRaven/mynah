@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import urllib.error
@@ -217,6 +218,35 @@ def _find_pack_root(extracted: Path) -> Path | None:
     return None
 
 
+def _prepare_macos_pack(pack_root: Path) -> None:
+    """macOS-only post-extract fixups (no-op elsewhere).
+
+    ``zipfile`` drops the Unix exec bit, so the freshly-extracted ``whisper-server`` (and the
+    dylibs) come out non-executable — restore +x. And a downloaded zip's contents inherit
+    ``com.apple.quarantine``; on an **unsigned** pack that makes Gatekeeper *silently* block the
+    server/dylibs (the loop just does nothing). Strip the attribute recursively so the pack
+    runs without a per-file "are you sure" gate."""
+    if sys.platform != "darwin":
+        return
+    import stat as _stat
+    import subprocess
+
+    # Restore the exec bit on the server binary and every dylib.
+    for p in [pack_root / _SERVER_EXE, *pack_root.rglob("*.dylib")]:
+        try:
+            if p.is_file():
+                p.chmod(p.stat().st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+        except OSError:
+            pass
+
+    # Strip quarantine from the whole pack dir (recursive). Best-effort — never fatal.
+    try:
+        subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(pack_root)],
+                       capture_output=True, timeout=30)
+    except Exception:
+        pass
+
+
 def _atomic_swap(pack_root: Path, target: Path) -> None:
     """Replace ``target`` with ``pack_root`` atomically-ish: rename any existing target aside,
     move the new one in, then delete the old. Never leaves the target missing-and-broken."""
@@ -291,6 +321,7 @@ def install_engine(backend: str, progress: ProgressCb | None = None,
         if pack_root is None:
             raise ComponentError(
                 f"the {backend} pack has no {_SERVER_EXE} — wrong/empty archive?")
+        _prepare_macos_pack(pack_root)
         _atomic_swap(pack_root, target)
         if progress:
             progress(1, 1, f"{backend} engine installed")

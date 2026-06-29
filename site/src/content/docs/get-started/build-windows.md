@@ -2,7 +2,7 @@
 title: Build the Windows app
 description: Build the portable Mynah.exe and the installer yourself, step by step.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 This builds the exact artifacts the [Releases](https://github.com/RSRaven/mynah/releases) page
@@ -33,7 +33,7 @@ Output: **`dist\Mynah\Mynah.exe`** — a onedir build (the `.exe` plus its DLLs/
 `dist\Mynah\`). Run it in place, or zip the whole folder to make the portable distribution:
 
 ```powershell
-Compress-Archive -Path dist\Mynah\* -DestinationPath dist\Mynah-0.3.1-portable.zip
+Compress-Archive -Path dist\Mynah\* -DestinationPath dist\Mynah-0.4.0-portable.zip
 ```
 
 What [`mynah.spec`](https://github.com/RSRaven/mynah/blob/master/mynah.spec) does:
@@ -53,10 +53,10 @@ What [`mynah.spec`](https://github.com/RSRaven/mynah/blob/master/mynah.spec) doe
 With the portable build present in `dist\Mynah\`, compile the installer and pass the version:
 
 ```powershell
-iscc /DMyAppVersion=0.3.1 installer.iss
+iscc /DMyAppVersion=0.4.0 installer.iss
 ```
 
-Output: **`dist\Mynah-Setup-0.3.1.exe`**.
+Output: **`dist\Mynah-Setup-0.4.0.exe`**.
 
 What [`installer.iss`](https://github.com/RSRaven/mynah/blob/master/installer.iss) produces:
 
@@ -93,7 +93,7 @@ require any of that — the app fetches the pack at runtime.
 ## Troubleshooting the build
 
 - **`iscc` not found:** install Inno Setup 6 and add its folder to `PATH`, or call it by full
-  path (e.g. `& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.3.1 installer.iss`).
+  path (e.g. `& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.4.0 installer.iss`).
 - **A stray ML import bloats the build:** make sure you installed into a clean virtualenv —
   the spec excludes `torch`/`ctranslate2`/etc., but only what's importable is analyzed.
 - **SmartScreen on the unsigned output:** expected for a self-built, unsigned exe — see

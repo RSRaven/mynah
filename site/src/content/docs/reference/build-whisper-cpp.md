@@ -5,9 +5,9 @@ sidebar:
   order: 2
 ---
 
-You only need this when **running from source** (or replacing the engine pack). The Windows app
-downloads a prebuilt Vulkan pack automatically on first run — you don't build anything to use the
-installed app.
+You only need this when **running from source** (or replacing the engine pack). The installed app
+downloads a prebuilt pack automatically on first run (Vulkan on Windows, Metal on macOS) — you
+don't build anything to use the installed app.
 
 A "build" is three pieces Mynah uses together:
 
@@ -66,6 +66,38 @@ The runnable files land in `build-vulkan\bin\`: `whisper-server.exe`, `whisper.d
   tested hardware with no extra download — see
   [Why whisper.cpp + Vulkan](/mynah/how-it-works/why-whisper-cpp-and-vulkan/).
 
+## macOS (Apple Silicon, Metal)
+
+On a Mac the GPU backend is **Metal**, and Mynah builds + hosts that pack itself (no upstream
+Metal `whisper-server` asset). The project script does it for you:
+
+```bash
+brew install cmake
+bash scripts/build_wcpp_metal.sh
+```
+
+That clones whisper.cpp at the pinned tag and builds with `GGML_METAL=ON` +
+`GGML_METAL_EMBED_LIBRARY=ON` (the Metal shader lib is embedded, so the pack is relocatable). By
+hand it's:
+
+```bash
+git clone --depth 1 --branch v1.9.1 https://github.com/ggml-org/whisper.cpp.git
+cd whisper.cpp
+cmake -S . -B build-metal \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
+  -DWHISPER_BUILD_SERVER=ON -DBUILD_SHARED_LIBS=ON \
+  -DWHISPER_SDL2=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DGGML_NATIVE=OFF
+cmake --build build-metal -j --config Release
+```
+
+Outputs in `build-metal/bin/`: `whisper-server`, `libwhisper.dylib`, and the `libggml*.dylib`
+set. To package a relocatable, flat pack (the layout the app installs), use
+[`scripts/pack_metal.py`](https://github.com/RSRaven/mynah/blob/master/scripts/pack_metal.py) —
+it rewrites the dylib install names to `@loader_path/…`. See
+[Build the macOS app](/mynah/get-started/build-macos/) for the full flow. Point Mynah at the
+build with `MYNAH_WHISPERCPP_DIR=…/build-metal/bin`.
+
 ## Get a model (GGML)
 
 Download a GGML model — e.g. **`ggml-large-v3.bin`** — from the whisper.cpp model repo on
@@ -80,11 +112,11 @@ $env:MYNAH_WHISPERCPP_MODEL = "C:\path\to\ggml-large-v3.bin"
 mynah --no-tray
 ```
 
-If you don't set these, Mynah looks in its defaults: `%APPDATA%\mynah\engines\whispercpp` and
-`%APPDATA%\mynah\models\ggml-large-v3.bin`. The rest is in
+If you don't set these, Mynah looks in its defaults: the per-backend engine dir under the
+runtime data dir and the shared model cache. The rest is in
 [Command line (CLI)](/mynah/using-mynah/cli/).
 
-:::note[macOS / Linux]
-The same CMake build works; outputs are `whisper-server`, `libwhisper.{dylib,so}`, and
-`libggml*.{dylib,so}`. On Apple Silicon, Metal is built by default — drop the Vulkan flag.
+:::note[Linux]
+The same CMake build works; outputs are `whisper-server`, `libwhisper.so`, and `libggml*.so`.
+Use the Vulkan flag for a GPU build, or drop it for CPU.
 :::

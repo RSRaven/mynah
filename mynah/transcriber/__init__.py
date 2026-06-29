@@ -19,6 +19,7 @@ in-process against the same ``whisper.dll`` (see :mod:`mynah.whispercpp_native`)
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from .base import Transcriber
@@ -33,9 +34,14 @@ _LEGACY_ALIASES = {"faster-whisper", "faster-whisper-cuda", "cuda", "cpu"}
 _WCPP_ENGINES = {"auto", "whispercpp", "whisper.cpp", "whispercpp-cuda",
                  "whispercpp-server", "whispercpp-vulkan", "whispercpp-cpu"}
 
-# whisper.cpp GPU/CPU backends, in `auto`-resolution priority: the **Vulkan** default GPU pack
-# first, then the optional NVIDIA CUDA upgrade, then the CPU floor.
-_BACKENDS = ("vulkan", "cuda", "cpu")
+# whisper.cpp GPU/CPU backends, in `auto`-resolution priority. Platform-specific: on macOS
+# the only GPU backend is **Metal**, then the CPU floor; on Windows/Linux the **Vulkan**
+# default GPU pack, then the optional NVIDIA CUDA upgrade, then CPU.
+_BACKENDS = ("metal", "cpu") if sys.platform == "darwin" else ("vulkan", "cuda", "cpu")
+
+# The backend `auto` falls back to when nothing is installed yet — so paths are well-defined
+# for setup + error messages. Metal on macOS, Vulkan elsewhere.
+_DEFAULT_BACKEND = "metal" if sys.platform == "darwin" else "vulkan"
 
 # Process-wide backend preference set once by the app from `[hardware] backend` (and on a live
 # change in Settings). Lets the existing `whispercpp_binary_dir(model_cfg)` call sites resolve
@@ -94,17 +100,18 @@ def installed_backends() -> list[str]:
 def resolve_backend(pref: str | None = None) -> str:
     """Map a backend preference to a concrete backend name.
 
-    ``auto`` (the default) picks the best **installed** pack — Vulkan (default GPU), then the
-    optional CUDA, then CPU; if nothing is installed yet it resolves to ``vulkan`` so paths are
+    ``auto`` (the default) picks the best **installed** pack in this platform's priority order
+    (macOS: Metal then CPU; else Vulkan, optional CUDA, then CPU); if nothing is installed yet
+    it resolves to the platform default (Metal on macOS, Vulkan elsewhere) so paths are
     well-defined for setup + error messages. A concrete preference is honoured as-is."""
     pref = (pref or _selected_backend or os.environ.get("MYNAH_BACKEND") or "auto").lower()
     if pref in _BACKENDS:
         return pref
-    # auto (or anything unknown): first installed in priority order, else the Vulkan default.
+    # auto (or anything unknown): first installed in priority order, else the platform default.
     for b in _BACKENDS:
         if _is_file(_server_exe(engine_dir(b))):
             return b
-    return "vulkan"
+    return _DEFAULT_BACKEND
 
 
 def whispercpp_binary_dir(model_cfg: dict | None = None) -> Path:

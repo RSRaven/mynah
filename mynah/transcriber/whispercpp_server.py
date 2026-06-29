@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -87,9 +89,10 @@ class WhisperCppServer(Transcriber):
         self._base = f"http://{host}:{self.port}"
 
     def load(self) -> None:
-        exe = self.binary_dir / "whisper-server.exe"
+        exe_name = "whisper-server.exe" if os.name == "nt" else "whisper-server"
+        exe = self.binary_dir / exe_name
         if not exe.exists():
-            raise FileNotFoundError(f"whisper-server.exe not found in {self.binary_dir}")
+            raise FileNotFoundError(f"{exe_name} not found in {self.binary_dir}")
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"GGML model not found: {self.model_path} — download "
@@ -162,11 +165,25 @@ class WhisperCppServer(Transcriber):
         self._proc = None
 
     def _accel(self) -> str:
-        """Acceleration of the build in binary_dir, from its ggml backend DLL."""
-        if (self.binary_dir / "ggml-cuda.dll").is_file():
+        """Acceleration of the build in binary_dir, from its ggml backend shared lib.
+
+        Each whisper.cpp build ships its GPU backend as a separate ggml-<name> library
+        (``.dll`` on Windows, ``.dylib`` on macOS, ``.so`` on Linux). Detect by stem so this
+        works across CUDA / Vulkan / Metal / CPU regardless of platform."""
+        def _has(stem: str) -> bool:
+            for ext in (".dll", ".dylib", ".so"):
+                if (self.binary_dir / f"{stem}{ext}").is_file():
+                    return True
+            # macOS dylibs may be versioned (libggml-metal.dylib); glob to be safe.
+            return bool(list(self.binary_dir.glob(f"{stem}*")) or
+                        list(self.binary_dir.glob(f"lib{stem}*")))
+
+        if _has("ggml-cuda"):
             return "CUDA"
-        if (self.binary_dir / "ggml-vulkan.dll").is_file():
+        if _has("ggml-vulkan"):
             return "Vulkan"
+        if _has("ggml-metal"):
+            return "Metal"
         return "CPU"
 
     @property

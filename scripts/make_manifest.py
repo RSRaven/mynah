@@ -95,54 +95,92 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", required=True)
     ap.add_argument("--release-base", required=True,
                     help="base URL of this release's assets")
-    ap.add_argument("--vulkan-zip", type=Path, required=True,
-                    help="path to the freshly-built whispercpp-vulkan-x64.zip")
+    ap.add_argument("--vulkan-zip", type=Path, default=None,
+                    help="path to the freshly-built whispercpp-vulkan-x64.zip (required unless "
+                         "--merge-into already carries the vulkan component)")
+    ap.add_argument("--metal-zip", type=Path, default=None,
+                    help="path to the freshly-built whispercpp-metal-arm64.zip (macOS CI; "
+                         "merged into the manifest when present)")
+    ap.add_argument("--merge-into", type=Path, default=None,
+                    help="an existing manifest.json to start from (keeps its components, e.g. "
+                         "the vulkan/cpu/cuda packs from the Windows job) and overlay onto. Used "
+                         "by the macOS job to add the Metal pack without re-fetching upstream.")
     ap.add_argument("--upstream-tag", default="v1.9.1")
     ap.add_argument("--out", type=Path, default=Path("mynah/manifest.json"))
     ap.add_argument("--hash-upstream", action="store_true",
                     help="download upstream CPU/CUDA packs to pin their sha256 (slow)")
     args = ap.parse_args(argv)
 
-    if not args.vulkan_zip.is_file():
-        sys.exit(f"ERROR: vulkan zip not found: {args.vulkan_zip}")
+    base = args.release_base.rstrip("/")
 
-    components: dict = {}
-
-    # Our Vulkan pack (hashed from the local build).
-    components["whispercpp-vulkan"] = {
-        "kind": "engine", "backend": "vulkan",
-        "url": f"{args.release_base.rstrip('/')}/whispercpp-vulkan-x64.zip",
-        "sha256": _sha256(args.vulkan_zip),
-        "size": args.vulkan_zip.stat().st_size,
-        "license": "MIT", "source": "mynah-release",
-        "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend.",
-    }
-
-    # Upstream CPU + optional CUDA packs.
-    rel = _get_json(f"https://api.github.com/repos/{UPSTREAM_REPO}/releases/tags/{args.upstream_tag}")
-    assets = rel.get("assets", [])
-    cpu = _find_asset(assets, CPU_MATCH)
-    cuda = _find_asset(assets, CUDA_MATCH)
-    if cpu is None:
-        sys.exit(f"ERROR: no CPU asset matching whisper-bin-x64.zip in {args.upstream_tag}")
-    components["whispercpp-cpu"] = {
-        "kind": "engine", "backend": "cpu", **_upstream_entry(cpu, args.hash_upstream, {
-            "license": "MIT",
-            "note": "Upstream CPU build — the no-GPU fallback (single-engine).",
-        })}
-    if cuda is not None:
-        components["whispercpp-cuda"] = {
-            "kind": "engine", "backend": "cuda", "optional": True,
-            **_upstream_entry(cuda, args.hash_upstream, {
-                "license": "MIT + NVIDIA CUDA Toolkit EULA (bundled cuBLAS)",
-                "license_note": ("Bundles NVIDIA cuBLAS under NVIDIA's CUDA Toolkit EULA, "
-                                 "fetched from the upstream whisper.cpp release (NVIDIA's "
-                                 "distribution channel); Mynah does not host NVIDIA binaries."),
-                "license_url": "https://docs.nvidia.com/cuda/eula/index.html",
-                "note": "Optional NVIDIA speed upgrade; self-contained cuBLAS.",
-            })}
+    # --merge-into: start from an existing manifest (e.g. the Windows job's vulkan+cpu+cuda)
+    # and only overlay what this run produces. Skips the upstream API fetch entirely.
+    if args.merge_into is not None:
+        if not args.merge_into.is_file():
+            sys.exit(f"ERROR: --merge-into manifest not found: {args.merge_into}")
+        prior = json.loads(args.merge_into.read_text(encoding="utf-8"))
+        components: dict = dict(prior.get("components", {}))
+        if args.metal_zip is None:
+            sys.exit("ERROR: --merge-into is for adding a pack — pass --metal-zip")
     else:
-        print("! no CUDA asset found upstream — manifest will omit the optional CUDA pack")
+        components = {}
+        if args.vulkan_zip is None:
+            sys.exit("ERROR: --vulkan-zip is required (or use --merge-into)")
+        if not args.vulkan_zip.is_file():
+            sys.exit(f"ERROR: vulkan zip not found: {args.vulkan_zip}")
+        # Our Vulkan pack (hashed from the local build).
+        components["whispercpp-vulkan"] = {
+            "kind": "engine", "backend": "vulkan",
+            "url": f"{base}/whispercpp-vulkan-x64.zip",
+            "sha256": _sha256(args.vulkan_zip),
+            "size": args.vulkan_zip.stat().st_size,
+            "license": "MIT", "source": "mynah-release",
+            "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend.",
+        }
+
+    # Our Metal pack (Apple Silicon, arm64) — built on the macOS runner; merged here when its
+    # zip is available. No upstream Metal server asset exists, so we host it like Vulkan.
+    if args.metal_zip is not None:
+        if not args.metal_zip.is_file():
+            sys.exit(f"ERROR: metal zip not found: {args.metal_zip}")
+        components["whispercpp-metal"] = {
+            "kind": "engine", "backend": "metal",
+            "url": f"{base}/whispercpp-metal-arm64.zip",
+            "sha256": _sha256(args.metal_zip),
+            "size": args.metal_zip.stat().st_size,
+            "license": "MIT", "source": "mynah-release",
+            "note": "Mynah-built Metal whisper.cpp runtime for Apple Silicon (arm64).",
+        }
+
+    # Upstream CPU + optional CUDA packs (skipped in --merge-into mode — the base manifest
+    # already carries them from the Windows job).
+    if args.merge_into is None:
+        rel = _get_json(
+            f"https://api.github.com/repos/{UPSTREAM_REPO}/releases/tags/{args.upstream_tag}")
+        assets = rel.get("assets", [])
+        cpu = _find_asset(assets, CPU_MATCH)
+        cuda = _find_asset(assets, CUDA_MATCH)
+        if cpu is None:
+            sys.exit(f"ERROR: no CPU asset matching whisper-bin-x64.zip in {args.upstream_tag}")
+        components["whispercpp-cpu"] = {
+            "kind": "engine", "backend": "cpu", **_upstream_entry(cpu, args.hash_upstream, {
+                "license": "MIT",
+                "note": "Upstream CPU build — the no-GPU fallback (single-engine).",
+            })}
+        if cuda is not None:
+            components["whispercpp-cuda"] = {
+                "kind": "engine", "backend": "cuda", "optional": True,
+                **_upstream_entry(cuda, args.hash_upstream, {
+                    "license": "MIT + NVIDIA CUDA Toolkit EULA (bundled cuBLAS)",
+                    "license_note": ("Bundles NVIDIA cuBLAS under NVIDIA's CUDA Toolkit EULA, "
+                                     "fetched from the upstream whisper.cpp release (NVIDIA's "
+                                     "distribution channel); Mynah does not host NVIDIA "
+                                     "binaries."),
+                    "license_url": "https://docs.nvidia.com/cuda/eula/index.html",
+                    "note": "Optional NVIDIA speed upgrade; self-contained cuBLAS.",
+                })}
+        else:
+            print("! no CUDA asset found upstream — manifest will omit the optional CUDA pack")
 
     manifest = {
         "schema": 1,
