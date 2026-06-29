@@ -24,9 +24,9 @@ const COLORS = {
 };
 
 const PHASES: Phase[] = [
-  { name: 'idle', label: 'Idle', chip: 'idle', dur: 900 },
-  { name: 'rec', label: 'Recording…', chip: 'rec', dur: 2000 }, // red bird + wave, held ~2s
-  { name: 'trans', label: 'Transcribing…', chip: 'trans', dur: 700 },
+  { name: 'idle', label: 'Idle', chip: 'idle', dur: 1350 },
+  { name: 'rec', label: 'Recording…', chip: 'rec', dur: 3000 }, // red bird + wave, held ~3s
+  { name: 'trans', label: 'Transcribing…', chip: 'trans', dur: 1050 },
   { name: 'type', label: 'Done', chip: 'idle', dur: 1700 },
   { name: 'hold', label: 'Done', chip: 'idle', dur: 1500 }, // the ~1.5s pause before looping
 ];

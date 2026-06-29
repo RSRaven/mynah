@@ -210,11 +210,24 @@ h1.hero-title .grad {
   color: var(--text);
   font-weight: 500;
 }
+.dl-label {
+  display: inline-block;
+  margin-top: 26px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dl-label .dl-sep {
+  color: var(--muted-2);
+  margin: 0 4px;
+}
 .hero .cta-row {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-top: 26px;
+  margin-top: 10px;
 }
 .badges {
   display: flex;
