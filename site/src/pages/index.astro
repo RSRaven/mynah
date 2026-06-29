@@ -11,11 +11,15 @@ import '../styles/landing.css';
 
 const base = import.meta.env.BASE_URL;
 const docs = `${base}get-started/install/`;
+const docsMac = `${base}get-started/install-macos/`;
 const gh = 'https://github.com/RSRaven/mynah';
 const releases = `${gh}/releases`;
+// Always-latest direct downloads (CI uploads these versionless aliases each release).
+const dlWindows = `${gh}/releases/latest/download/Mynah-Setup.exe`;
+const dlMac = `${gh}/releases/latest/download/Mynah-macos-arm64.zip`;
 const title = 'Mynah — local push-to-talk voice typing';
 const description =
-  'Hold a key, talk, and the text is typed at your cursor — in any app. Local, GPU-accelerated voice typing for Windows. Free, open-source, 100% offline. No cloud, no telemetry.';
+  'Hold a key, talk, and the text is typed at your cursor — in any app. Local, GPU-accelerated voice typing for Windows and macOS. Free, open-source, 100% offline. No cloud, no telemetry.';
 const ogImage = `${base}brand/mynah-logo.png`;
 ---
 
@@ -62,19 +66,24 @@ const ogImage = `${base}brand/mynah-logo.png`;
           <h1 class="hero-title">Hold a key.<br />Talk. <span class="grad">It's typed.</span></h1>
           <p class="lede">
             <span class="tagline">Like a mynah, it listens and echoes you — perfectly.</span>{' '}
-            Local, GPU-accelerated voice typing for Windows. Speak into any app and the text lands
-            at your cursor. Your voice never leaves the machine.
+            Local, GPU-accelerated voice typing for Windows and macOS. Speak into any app and the
+            text lands at your cursor. Your voice never leaves the machine.
           </p>
           <div class="cta-row">
-            <a href={releases} class="btn btn-primary btn-lg">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10.5m0 0l4-4m-4 4l-4-4M5 19h14"></path></svg>
+            <a href={dlWindows} class="btn btn-primary btn-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5l8-1.1v7.2H3V5.5zM3 18.5l8 1.1v-7.1H3v6zM12 4.2L22 3v9.6h-10V4.2zM12 19.8L22 21v-8.4H12v7.2z"></path></svg>
               Download for Windows
+            </a>
+            <a href={dlMac} class="btn btn-primary btn-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.8 1.1 9 .7 1.1 1.6 2.3 2.7 2.2 1.1 0 1.5-.7 2.8-.7 1.3 0 1.6.7 2.8.7 1.2 0 1.9-1.1 2.6-2.1.8-1.2 1.1-2.3 1.2-2.4-.1 0-2.3-.9-2.3-3.5zM14.2 5.8c.6-.8 1-1.8.9-2.8-.9 0-2 .6-2.6 1.3-.6.7-1.1 1.7-1 2.7 1 0 2-.5 2.7-1.2z"></path></svg>
+              Download for macOS
             </a>
             <a href={gh} class="btn btn-ghost btn-lg">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.3 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.7.3-1.1.6-1.4-2.2-.3-4.6-1.2-4.6-5.1 0-1.1.4-2 1-2.7-.1-.3-.5-1.3.1-2.7 0 0 .8-.3 2.7 1a9 9 0 014.9 0c1.9-1.3 2.7-1 2.7-1 .6 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.8-4.6 5.1.4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10.3 10.3 0 0022 12.3C22 6.6 17.5 2 12 2z"></path></svg>
-              View on GitHub
+              GitHub
             </a>
           </div>
+          <p class="dl-note">Windows 10/11 · macOS (Apple Silicon) · free &amp; open source</p>
           <div class="badges">
             <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--idle)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linejoin="round"></path></svg> On-device Whisper large-v3</span>
             <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--trans)" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" stroke-linejoin="round"></path></svg> Sub-second, resident on GPU</span>
@@ -85,7 +94,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
         <!-- the living mark: 3D waveform-mynah -->
         <div class="hero-stage">
           <div class="stage-top">
-            <kbd class="key" id="key">F9</kbd>
+            <kbd class="key" id="key">hold hotkey</kbd>
             <span class="state-chip" id="chip"><span class="dot" id="chipdot"></span><span id="chiptxt">Idle</span></span>
           </div>
           <div class="bird-stage">
@@ -119,7 +128,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
         <div class="pipe reveal">
           <div class="node" data-step="0">
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="10" rx="2"></rect><path d="M7 11h.01M11 11h.01M15 11h.01M8 14h8"></path></svg></div>
-            <h4>Hotkey / wake word</h4><p>Hold F9, tap F10, or say "hey mynah".</p>
+            <h4>Hotkey / wake word</h4><p>Hold the key, tap to toggle, or say "hey mynah".</p>
           </div>
           <div class="node" data-step="1">
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0014 0M12 18v3"></path></svg></div>
@@ -170,12 +179,12 @@ const ogImage = `${base}brand/mynah-logo.png`;
         </div>
         <div class="acts reveal">
           <div class="act">
-            <span class="pill-key">hold · F9</span>
+            <span class="pill-key">hold · F9 / ⌘⇧Space</span>
             <h3>Push-to-talk</h3>
             <p>Hold the key, speak, release. Walkie-talkie style — nothing records unless you're holding it.</p>
           </div>
           <div class="act">
-            <span class="pill-key">tap · F10</span>
+            <span class="pill-key">tap · F10 / ⌃⇧Space</span>
             <h3>Toggle</h3>
             <p>Tap once to start, tap again to stop. Hands free for longer dictation, no key to hold down.</p>
           </div>
@@ -205,7 +214,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
             <div class="opt">
               <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--idle)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M8 9v6M12 7v10M16 10v4"></path></svg> Backends</h4>
               <p>Auto-detected, override anytime.</p>
-              <div class="tags"><span class="tag on">Vulkan</span><span class="tag">CUDA</span><span class="tag">CPU</span></div>
+              <div class="tags"><span class="tag on">Vulkan</span><span class="tag on">Metal</span><span class="tag">CUDA</span><span class="tag">CPU</span></div>
             </div>
             <div class="opt">
               <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--trans)" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path></svg> Models</h4>
@@ -215,7 +224,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
             <div class="opt">
               <h4><svg viewBox="0 0 24 24" fill="none" stroke="var(--load)" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"></path></svg> Hotkeys</h4>
               <p>Rebind push-to-talk & toggle; stack combos.</p>
-              <div class="tags"><span class="tag on">F9</span><span class="tag">F10</span><span class="tag">ctrl+space</span></div>
+              <div class="tags"><span class="tag on">F9</span><span class="tag on">⌘⇧Space</span><span class="tag">F10</span><span class="tag">custom</span></div>
             </div>
             <div class="opt">
               <h4><svg viewBox="0 0 24 24" fill="none" stroke="#36d68a" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0014 0M12 18v3"></path></svg> Wake phrase</h4>
@@ -224,15 +233,15 @@ const ogImage = `${base}brand/mynah-logo.png`;
             </div>
           </div>
           <div class="code">
-            <div class="editor-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>%APPDATA%\mynah\config.toml</span></div>
+            <div class="editor-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>config.toml</span></div>
 <pre><span class="c"># everything below is optional — these are the defaults</span>
 <span class="h">[model]</span>
 <span class="k">name</span>    = <span class="s">"large-v3"</span>   <span class="c"># or large-v3-turbo / medium / small</span>
 
 <span class="h">[hardware]</span>
-<span class="k">backend</span> = <span class="s">"auto"</span>       <span class="c"># auto | vulkan | cuda | cpu</span>
+<span class="k">backend</span> = <span class="s">"auto"</span>       <span class="c"># vulkan (PC) · metal (Mac) · cuda · cpu</span>
 
-<span class="h">[hotkey]</span>
+<span class="h">[hotkey]</span>            <span class="c"># macOS: cmd+shift+space / ctrl+shift+space</span>
 <span class="k">push_to_talk</span> = <span class="s">"f9"</span>
 <span class="k">toggle</span>       = <span class="s">"f10"</span>
 
@@ -291,10 +300,11 @@ const ogImage = `${base}brand/mynah-logo.png`;
             </table>
           </div>
           <div class="tbl-card">
-            <div class="hd"><h3>GPU backend: Vulkan by default</h3><p>RTX 2080, large-v3, warm short clip. CUDA-parity speed, identical accuracy.</p></div>
+            <div class="hd"><h3>GPU backend, auto-picked per OS</h3><p>Vulkan on PC, Metal on Apple Silicon — both need no extra download. RTX 2080 / M2 Pro, large-v3, warm short clip.</p></div>
             <table class="cmp">
               <tr><th>Backend</th><th>Works on</th><th>Download</th><th>Speed</th></tr>
-              <tr class="win-row"><td>Vulkan <span class="pill def">default</span></td><td>NVIDIA/AMD/Intel</td><td>~74 MB</td><td>sub-second</td></tr>
+              <tr class="win-row"><td>Vulkan <span class="pill def">PC default</span></td><td>NVIDIA/AMD/Intel</td><td>~74 MB</td><td>sub-second</td></tr>
+              <tr class="win-row"><td>Metal <span class="pill def">Mac default</span></td><td>Apple Silicon</td><td>~4 MB</td><td>sub-second</td></tr>
               <tr><td>CUDA</td><td>NVIDIA only</td><td>~1.3 GB</td><td>≈ Vulkan</td></tr>
               <tr><td>CPU</td><td>any machine</td><td>none</td><td>several s</td></tr>
             </table>
@@ -308,14 +318,15 @@ const ogImage = `${base}brand/mynah-logo.png`;
       <div class="wrap reveal">
         <h2>Start dictating in two minutes</h2>
         <p>
-          Grab the installer or the portable zip. First run detects your hardware and downloads the
-          engine pack and model with a progress bar — then it just lives in your tray.
+          Grab the build for your OS. First run detects your hardware and downloads the engine pack
+          and model with a progress bar — then it just lives in your tray or menu bar.
         </p>
         <div class="cta-row">
-          <a href={releases} class="btn btn-primary btn-lg">Download for Windows</a>
+          <a href={dlWindows} class="btn btn-primary btn-lg">Download for Windows</a>
+          <a href={dlMac} class="btn btn-primary btn-lg">Download for macOS</a>
           <a href={docs} class="btn btn-ghost btn-lg">Read the docs</a>
         </div>
-        <div class="dl-meta">per-user install, no admin · or portable .zip · ~74 MB engine + model on first run</div>
+        <div class="dl-meta">Windows: installer or portable .zip · macOS: Apple Silicon .app · engine + model fetched on first run</div>
       </div>
     </section>
 

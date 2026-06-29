@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+On **macOS (Apple Silicon)?** See [Install (macOS)](/mynah/get-started/install-macos/) instead.
+
 Grab the latest build from the [**Releases**](https://github.com/RSRaven/mynah/releases) page:
 
 - **`Mynah-Setup-X.Y.Z.exe`** — installer (per-user, no admin prompt). Creates Start-menu and

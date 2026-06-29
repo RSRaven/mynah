@@ -827,6 +827,12 @@ td .pill {
   margin-top: 18px;
   font-family: var(--font-mono);
 }
+.dl-note {
+  color: var(--muted-2);
+  font-size: 13px;
+  margin-top: 14px;
+  font-family: var(--font-mono);
+}
 
 /* ---------- footer ---------- */
 footer.site {
