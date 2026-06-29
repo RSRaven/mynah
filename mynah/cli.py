@@ -28,6 +28,34 @@ def _fix_windows_console() -> None:
             pass
 
 
+def _fix_pyobjc_hiservices() -> None:
+    """macOS frozen-app fix: make ``HIServices.AXIsProcessTrusted`` resolvable.
+
+    pynput's global key listener calls ``HIServices.AXIsProcessTrusted()`` (the Accessibility
+    check) via pyobjc's lazy ``__getattr__``. In a PyInstaller bundle that lazy function lookup
+    raises ``KeyError: 'AXIsProcessTrusted'`` and kills the listener thread — so the hotkey
+    silently never fires. The symbol resolves fine from the ``ApplicationServices`` umbrella
+    framework (our permissions.py uses it), so seed it into the ``HIServices`` module up front:
+    try the native lazy load once, and if that fails, alias the working ApplicationServices
+    callable into HIServices' namespace before pynput imports it. No-op off macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import HIServices
+
+        try:
+            HIServices.AXIsProcessTrusted  # force the lazy resolve (works unfrozen)
+            return
+        except Exception:
+            pass
+        from ApplicationServices import AXIsProcessTrusted, AXIsProcessTrustedWithOptions
+
+        HIServices.AXIsProcessTrusted = AXIsProcessTrusted
+        HIServices.AXIsProcessTrustedWithOptions = AXIsProcessTrustedWithOptions
+    except Exception:
+        pass  # best-effort; pynput will still warn if it truly can't check the grant
+
+
 def _set_dpi_awareness() -> None:
     """Tell Windows we render at native resolution, so Tk windows + the icon aren't
     bitmap-stretched (blurry) on scaled / high-DPI displays. Must run before any window is
@@ -101,10 +129,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-devices", action="store_true",
                    help="List audio input devices and exit.")
     p.add_argument("--probe", action="store_true",
-                   help="Detect the GPU (NVIDIA/AMD/Intel) and print the recommended "
+                   help="Detect the GPU (NVIDIA/AMD/Intel/Apple) and print the recommended "
                         "backend + model, then exit.")
-    p.add_argument("--backend", choices=["auto", "vulkan", "cuda", "cpu"],
-                   help="Engine pack to run (auto = best installed; default GPU = Vulkan).")
+    p.add_argument("--permissions", action="store_true",
+                   help="(macOS) Print the Microphone / Input Monitoring / Accessibility grant "
+                        "status and the System Settings links, then exit.")
+    p.add_argument("--backend", choices=["auto", "vulkan", "cuda", "metal", "cpu"],
+                   help="Engine pack to run (auto = best installed; default GPU = Metal on "
+                        "Apple Silicon, Vulkan elsewhere).")
     p.add_argument("--purge-runtime", action="store_true",
                    help="Uninstall step: silently remove engine packs + config + logs (never "
                         "touches the shared model cache), then exit.")
@@ -134,6 +166,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-sound", action="store_true", help="Disable sound cues.")
     p.add_argument("--no-tray", "--headless", dest="headless", action="store_true",
                    help="Run as a console app without the system tray (Phase 1 behaviour).")
+    p.add_argument("--settings", action="store_true",
+                   help=argparse.SUPPRESS)  # internal: open the Settings window as its own
+                   # process (macOS), so Tk owns this process's main thread.
+    p.add_argument("--first-run-setup", action="store_true",
+                   help=argparse.SUPPRESS)  # internal: open --settings in first-run setup mode.
+    p.add_argument("--selftest-paste", action="store_true",
+                   help=argparse.SUPPRESS)  # internal: diagnostic for the clipboard-paste path.
+    p.add_argument("--selftest-keys", action="store_true",
+                   help=argparse.SUPPRESS)  # internal: diagnostic for the global key listener.
     p.add_argument("--version", action="version", version=f"mynah {__version__}")
     return p
 
@@ -195,7 +236,9 @@ def _print_probe() -> None:
         for d in gpu.devices:
             print(f"    - {d.get('vendor', '?'):8} {d.get('name', '')}"
                   f"  {d.get('vram_mb', 0)} MB")
-    print(f"  backend : {backend}   (vulkan=default GPU backend · cpu=fallback)")
+    _hint = ("metal=default GPU backend · cpu=fallback" if gpu.vendor == "apple"
+             else "vulkan=default GPU backend · cpu=fallback")
+    print(f"  backend : {backend}   ({_hint})")
     print(f"  model   : {model}")
     if cuda_is_optional(gpu):
         print("  note    : NVIDIA detected — the CUDA pack is an optional setup upgrade "
@@ -208,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     _set_app_user_model_id()
     _redirect_logs_if_windowed()
     _fix_windows_console()
+    _fix_pyobjc_hiservices()
     args = _build_parser().parse_args(argv)
 
     if args.write_config:
@@ -221,6 +265,54 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.probe:
         _print_probe()
+        return 0
+
+    if args.permissions:
+        if sys.platform != "darwin":
+            print("--permissions is macOS-only (no TCC gates on this OS).")
+            return 0
+        from .permissions import check_permissions, summary_text
+
+        print(summary_text())
+        return 0 if all(p.granted for p in check_permissions()) else 1
+
+    if getattr(args, "selftest_keys", False):
+        # Diagnostic: start a pynput global key listener from THIS identity and report whether
+        # macOS considers the process trusted + whether key events actually arrive. Press any
+        # keys for ~8s; each is logged. Reveals Input-Monitoring/Accessibility issues in the .app.
+        import time as _t
+
+        import HIServices
+        from pynput import keyboard
+        print(f"selftest-keys: AXIsProcessTrusted()={HIServices.AXIsProcessTrusted()}")
+        got = {"n": 0}
+
+        def _p(key):
+            got["n"] += 1
+            print(f"selftest-keys: press {key!r}")
+
+        lis = keyboard.Listener(on_press=_p)
+        lis.start()
+        _t.sleep(8)
+        lis.stop()
+        print(f"selftest-keys: received {got['n']} key events "
+              f"({'OK' if got['n'] else 'NONE — listener is not receiving input'})")
+        return 0
+
+    if getattr(args, "selftest_paste", False):
+        # Diagnostic: exercise the exact clipboard-paste insert path from THIS process/identity
+        # (used to debug why the frozen .app doesn't insert). Waits, then pastes a marker into
+        # whatever is frontmost.
+        import time as _t
+
+        from .insert import insert_text
+        print("selftest-paste: focus a text field; pasting in 4s…")
+        _t.sleep(4)
+        try:
+            insert_text("MYNAH_SELFTEST_PASTE", method="paste", restore_clipboard=True)
+            print("selftest-paste: insert_text returned without error")
+        except Exception as e:
+            print(f"selftest-paste: FAILED: {e!r}")
         return 0
 
     if args.purge_runtime:
@@ -239,6 +331,15 @@ def main(argv: list[str] | None = None) -> int:
     _apply_overrides(cfg, args)
 
     cfgpath = args.config or config_path()
+
+    if args.settings:
+        # Internal entry point: the Settings window as its own process. On macOS the menu-bar
+        # app (pystray, AppKit) owns the parent process's main thread, so Tk can't also run
+        # there — we spawn this child where Tk owns the main thread (see app.open_settings).
+        from .app import run_settings_process
+
+        return run_settings_process(cfg, cfgpath, setup=args.first_run_setup)
+
     print(f"Mynah {__version__}")
     print(f"Config: {cfgpath}" + ("" if (args.config or config_path().is_file())
                                   else " (not found — using defaults; --write-config to create)"))
@@ -259,7 +360,16 @@ def run_headless(cfg: dict, args: argparse.Namespace) -> int:
     from .controller import Controller
     from .transcriber import build_transcriber, set_backend
 
-    # Honour the configured engine pack (auto = best installed; default GPU = Vulkan).
+    # On macOS the core loop silently no-ops without the TCC grants — warn early so the user
+    # knows why the hotkey/paste might not fire, with the exact panes to enable.
+    if sys.platform == "darwin":
+        from .permissions import missing_permissions, summary_text
+
+        if missing_permissions():
+            print(summary_text())
+
+    # Honour the configured engine pack (auto = best installed; default GPU = Metal on Apple
+    # Silicon, Vulkan elsewhere).
     set_backend(cfg.get("hardware", {}).get("backend", "auto"))
 
     # Load the model once; keep it resident.

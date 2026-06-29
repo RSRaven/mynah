@@ -70,16 +70,30 @@ def paste_modifier():
 # --- "run at login" ----------------------------------------------------------
 #
 # Windows: a per-user ``HKCU\...\Run`` registry value. The Inno installer can set the same
-# value at install time; this lets the Settings toggle flip it live and survive reboot. macOS
-# (LaunchAgent) and Linux (.desktop autostart) are Phase 4/6 — stubbed to no-ops here.
+# value at install time; this lets the Settings toggle flip it live and survive reboot.
+# macOS: a per-user **LaunchAgent** plist in ``~/Library/LaunchAgents``. Linux (.desktop
+# autostart) is a later phase — stubbed to a no-op there.
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_VALUE = "Mynah"
 
+# macOS LaunchAgent (per-user; runs on login, survives reboot).
+_LAUNCH_AGENT_LABEL = "com.mynah.mynah"
+
+
+def _launch_agent_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_LAUNCH_AGENT_LABEL}.plist"
+
 
 def autostart_command() -> str | None:
-    """The command to relaunch Mynah at login. Prefer the frozen exe (PyInstaller build);
-    else fall back to ``pythonw -m mynah`` so a dev/pip install can still autostart."""
+    """The command to relaunch Mynah at login. Prefer the frozen build (PyInstaller); else
+    fall back to a dev/pip launcher so an editable install can still autostart."""
+    if sys.platform == "darwin":
+        # Frozen: the bundle's ``MacOS/Mynah`` executable. Dev: ``python -m mynah`` with the
+        # current interpreter (a .venv python keeps the deps on import).
+        if getattr(sys, "frozen", False):
+            return sys.executable
+        return f'{sys.executable} -m mynah'
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
     pyw = Path(sys.executable).with_name("pythonw.exe")
@@ -87,7 +101,33 @@ def autostart_command() -> str | None:
     return f'"{launcher}" -m mynah'
 
 
+def _autostart_program_args() -> list[str]:
+    """The LaunchAgent ``ProgramArguments`` array (argv form, no shell quoting)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, "-m", "mynah"]
+
+
+def _launch_agent_plist() -> str:
+    args = "".join(f"    <string>{a}</string>\n" for a in _autostart_program_args())
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        f'  <key>Label</key><string>{_LAUNCH_AGENT_LABEL}</string>\n'
+        '  <key>ProgramArguments</key><array>\n'
+        f'{args}'
+        '  </array>\n'
+        '  <key>RunAtLoad</key><true/>\n'
+        '  <key>ProcessType</key><string>Interactive</string>\n'
+        '</dict></plist>\n'
+    )
+
+
 def is_run_at_login() -> bool:
+    if sys.platform == "darwin":
+        return _launch_agent_path().is_file()
     if sys.platform != "win32":
         return False
     try:
@@ -102,8 +142,33 @@ def is_run_at_login() -> bool:
         return False
 
 
+def _set_run_at_login_darwin(enabled: bool) -> bool:
+    import subprocess
+
+    plist = _launch_agent_path()
+    try:
+        if enabled:
+            plist.parent.mkdir(parents=True, exist_ok=True)
+            plist.write_text(_launch_agent_plist(), encoding="utf-8")
+            # Load it now so it's active this session too (best-effort; ignore if already
+            # loaded or launchctl is unhappy — the plist alone makes it run next login).
+            subprocess.run(["launchctl", "load", "-w", str(plist)],
+                           capture_output=True, timeout=10)
+            return True
+        if plist.is_file():
+            subprocess.run(["launchctl", "unload", "-w", str(plist)],
+                           capture_output=True, timeout=10)
+            plist.unlink(missing_ok=True)
+        return False
+    except OSError as e:
+        print(f"! couldn't update run-at-login: {e}")
+        return is_run_at_login()
+
+
 def set_run_at_login(enabled: bool) -> bool:
-    """Enable/disable launch at login. Returns the resulting state. No-op (False) off Windows."""
+    """Enable/disable launch at login. Returns the resulting state. No-op (False) on Linux."""
+    if sys.platform == "darwin":
+        return _set_run_at_login_darwin(enabled)
     if sys.platform != "win32":
         return False
     try:

@@ -40,8 +40,21 @@ class SettingsWindow:
         self._lang_to_code: dict = {}
         self._code_to_lang: dict = {}
         self._pulsing = False
+        self._tk_capturing = False  # darwin: a Tk-native hotkey capture is in progress
 
     # --- lifecycle ----------------------------------------------------------
+
+    def run_blocking(self, setup: bool = False) -> None:
+        """Build the window and run Tk's mainloop on the **current** thread, blocking until it
+        closes. Used by the macOS ``mynah --settings`` subprocess, where Tk must own the
+        process's main thread (a secondary-thread Tk root hangs / crashes on macOS, and would
+        also fight pystray's AppKit run loop if both lived in one process). On Windows/Linux the
+        normal in-process :meth:`show` path is used instead."""
+        if setup:
+            self._setup = True
+        with self._lifecycle_lock:
+            self._starting = True
+        self._run()  # builds + mainloop() here, on this (main) thread; returns on close
 
     def show(self, setup: bool = False) -> None:
         if setup:
@@ -471,7 +484,106 @@ class SettingsWindow:
         self.app.set_wakeword_silence_ms(self._w["wake_sil"].get())
 
     def _on_change(self, kind: str) -> None:
+        # macOS: capture the shortcut with Tk's own key events, NOT pynput. pynput's global
+        # listener resolves keycodes via macOS TSM (Text Input Source) APIs on its listener
+        # thread, and those are main-thread-only — pressing a key during capture trips a
+        # dispatch_assert_queue / BPT-trap and crashes the process (the "reopen?" dialog). Tk
+        # delivers keypresses on the main thread, needs no Input Monitoring grant, and the
+        # captured spec is written to config the same way (the menu-bar app re-arms it).
+        if sys.platform == "darwin":
+            self._capture_hotkey_tk(kind)
+            return
         self.app.begin_hotkey_capture(kind)  # poll reflects the prompt + disables controls
+
+    # Tk keysym -> the token parse_hotkey() understands.
+    _TK_KEYSYM_TOKENS = {
+        "space": "space", "Tab": "tab", "Return": "enter", "Escape": "esc",
+        "Caps_Lock": "capslock", "Home": "home", "End": "end",
+        "Prior": "pageup", "Next": "pagedown", "Insert": "insert", "Pause": "pause",
+    }
+
+    def _capture_hotkey_tk(self, kind: str) -> None:
+        """Capture one key-combo via Tk and persist it (darwin Settings subprocess).
+
+        Grabs the keyboard, shows the prompt, and resolves the first non-modifier keypress to a
+        spec string ("f9", "ctrl+space", "cmd+shift+d"). Esc cancels."""
+        root = self._root
+        if root is None or self._tk_capturing:
+            return
+        self._tk_capturing = True  # tell the poll to leave the prompt + buttons alone
+        label = "Hold-to-talk" if kind == "ptt" else "Toggle on/off"
+        self._w["status"].config(text=f"Press a shortcut for {label} now…  (Esc to cancel)")
+        for b in self._w["buttons"]:
+            b.config(state="disabled")
+        self._w["cancel"].grid()
+
+        def finish(spec):
+            self._tk_capturing = False
+            try:
+                root.unbind("<KeyPress>")
+            except Exception:
+                pass
+            try:
+                root.grab_release()
+            except Exception:
+                pass
+            self._w["cancel"].grid_remove()
+            for b in self._w["buttons"]:
+                b.config(state="normal")
+            if spec:
+                ok = self.app.set_hotkey(kind, spec)
+                self._w["status"].config(
+                    text=(f"{label} set to {spec}." if ok else f"Couldn't use '{spec}'."))
+                # refresh the shown value immediately
+                self._conf(self._w["ptt_val"], text=self.app.hotkey_desc("ptt"))
+                self._conf(self._w["tog_val"], text=self.app.hotkey_desc("toggle"))
+            else:
+                self._w["status"].config(text="")
+
+        # Let the on-screen Cancel button back out too.
+        self._w["cancel"].config(command=lambda: finish(None))
+
+        def on_key(event):
+            ks = event.keysym
+            if ks in ("Escape",):
+                finish(None)
+                return "break"
+            # Ignore a bare modifier press — wait for the real key.
+            if ks in ("Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R",
+                      "Meta_L", "Meta_R", "Super_L", "Super_R", "Command", "Option"):
+                return "break"
+            mods = []
+            s = event.state
+            # Tk modifier bitmask: Control=0x4, Shift=0x1; on macOS Command=0x8 (Mod1)/0x10,
+            # Option(Alt)=0x10/0x20. Cover the common bits.
+            if s & 0x4:
+                mods.append("ctrl")
+            if s & 0x20000 or s & 0x8:    # Command (macOS)
+                mods.append("cmd")
+            if s & 0x10 or s & 0x80000:   # Option/Alt (macOS)
+                mods.append("alt")
+            if s & 0x1:
+                mods.append("shift")
+            # The main key token.
+            tok = self._TK_KEYSYM_TOKENS.get(ks)
+            if tok is None:
+                if len(ks) == 1 and ks.isprintable():
+                    tok = ks.lower()
+                elif len(ks) >= 2 and ks[0] in "fF" and ks[1:].isdigit():
+                    tok = ks.lower()              # F1..F24
+                else:
+                    tok = ks.lower()              # best effort
+            spec = "+".join(mods + [tok])
+            finish(spec)
+            return "break"
+
+        try:
+            root.bind("<KeyPress>", on_key)
+            root.grab_set()
+            root.focus_force()
+        except Exception as e:
+            print(f"! Tk hotkey capture couldn't start: {e}")
+            finish(None)
 
     def _install_typeahead(self, cb, on_commit) -> None:
         """First-letter / prefix type-ahead for a readonly ``ttk.Combobox`` (language list)."""
@@ -606,6 +718,12 @@ class SettingsWindow:
 
     def _sync(self) -> None:
         w = self._w
+        # While a Tk-native hotkey capture is running (darwin), leave the prompt + buttons +
+        # hotkey labels exactly as the capture set them — otherwise this 200ms poll instantly
+        # clears the "Press a shortcut…" prompt and re-enables the buttons.
+        if self._tk_capturing:
+            self._sync_models()
+            return
         self._conf(w["ptt_val"], text=self.app.hotkey_desc("ptt"))
         self._conf(w["tog_val"], text=self.app.hotkey_desc("toggle"))
 

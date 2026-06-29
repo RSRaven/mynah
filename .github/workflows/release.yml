@@ -1,10 +1,16 @@
 name: release
 
-# On a version tag, build the whole release on windows-latest **with no GPU** —
-# the Vulkan pack (we build it; no upstream asset exists), the small PyInstaller base, the
-# portable zip, the Inno installer, and the pinned manifest.json — then attach them to the
+# On a version tag, build the whole release across two runners and attach everything to one
 # GitHub Release. `workflow_dispatch` does the same build but uploads the artifacts to the run
-# (a dry run) instead of publishing a release.
+# (a dry run) instead of publishing.
+#
+#   build         (windows-latest, no GPU): the Vulkan pack (we build it; no upstream asset
+#                 exists), the PyInstaller base, the portable zip, the Inno installer, and the
+#                 manifest.json with the vulkan/cpu/cuda packs.
+#   build-macos   (macos-14, Apple Silicon): the Metal pack (also Mynah-hosted; no upstream
+#                 Metal asset), the .app bundle (ad-hoc signed, unsigned distribution), and the
+#                 SAME manifest with the Metal component merged in. Runs after `build` and reuses
+#                 its manifest so the published manifest carries every backend.
 
 on:
   push:
@@ -97,6 +103,22 @@ jobs:
         shell: bash
         run: cp mynah/manifest.json dist/manifest.json
 
+      # Versionless copies so the website's "Download" buttons can link to the always-latest
+      # /releases/latest/download/<stable-name> URL (the versioned names change every release).
+      - name: Stage versionless download aliases
+        shell: bash
+        run: |
+          cp "dist/Mynah-Setup-${{ steps.ver.outputs.version }}.exe" dist/Mynah-Setup.exe
+          cp "dist/Mynah-${{ steps.ver.outputs.version }}-portable.zip" dist/Mynah-portable.zip
+
+      # The macOS job (build-macos) starts from THIS manifest and overlays the Metal pack onto
+      # it, then publishes the merged result. Hand it over as a workflow artifact.
+      - name: Upload base manifest for the macOS job
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-base
+          path: dist/manifest.json
+
       # --- publish ----------------------------------------------------------------------
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -105,8 +127,9 @@ jobs:
           files: |
             dist/Mynah-Setup-${{ steps.ver.outputs.version }}.exe
             dist/Mynah-${{ steps.ver.outputs.version }}-portable.zip
+            dist/Mynah-Setup.exe
+            dist/Mynah-portable.zip
             dist/whispercpp-vulkan-x64.zip
-            dist/manifest.json
 
       - name: Upload build artifacts (dry run)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -117,4 +140,103 @@ jobs:
             dist/Mynah-Setup-*.exe
             dist/Mynah-*-portable.zip
             dist/whispercpp-vulkan-x64.zip
+            dist/manifest.json
+
+  # ============================================================================
+  # macOS (Apple Silicon): build the Metal whisper.cpp pack (no upstream Metal asset exists,
+  # so we build + host it, exactly like Vulkan), the .app bundle (ad-hoc signed, unsigned
+  # distribution per the deferred-notarization decision), zip both, merge the Metal component
+  # into the Windows job's manifest, and publish everything to the same release. This is the
+  # only way to get a Mac-built engine pack without doing it by hand each release — the Apple
+  # toolchain doesn't cross-compile and PyInstaller can't cross-build a .app.
+  # ============================================================================
+  build-macos:
+    runs-on: macos-14            # Apple Silicon (arm64)
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dev"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: brew install cmake
+
+      # --- Metal whisper.cpp pack (we host it; no upstream Metal asset) ------------------
+      - name: Build Metal whisper.cpp pack
+        run: bash scripts/build_wcpp_metal.sh
+
+      - name: Zip Metal pack
+        run: |
+          mkdir -p dist
+          python scripts/pack_metal.py \
+            --bin scripts/_artifacts/wcpp-src/build-metal/bin \
+            --out dist/whispercpp-metal-arm64.zip
+
+      # --- Python app + .app bundle ------------------------------------------------------
+      - name: Install Python build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices
+
+      - name: Build app (PyInstaller, .app bundle)
+        run: pyinstaller --noconfirm mynah.spec
+
+      - name: Ad-hoc sign the .app
+        # Unsigned distribution: ad-hoc gives the bundle a code identity so macOS will record
+        # the user's Mic / Input Monitoring / Accessibility grants. Developer-ID signing +
+        # notarization is deferred (users do a one-time Gatekeeper bypass — see the docs).
+        run: codesign -s - --deep --force dist/Mynah.app
+
+      - name: Zip the .app
+        run: |
+          cd dist
+          ditto -c -k --keepParent Mynah.app "Mynah-${{ steps.ver.outputs.version }}-macos-arm64.zip"
+          # versionless alias for the website's always-latest download button
+          cp "Mynah-${{ steps.ver.outputs.version }}-macos-arm64.zip" "Mynah-macos-arm64.zip"
+
+      # --- merge Metal into the manifest the Windows job produced -------------------------
+      - name: Download base manifest (vulkan + cpu + cuda)
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-base
+          path: base
+
+      - name: Merge Metal into manifest.json
+        run: |
+          python scripts/make_manifest.py \
+            --version "${{ steps.ver.outputs.version }}" \
+            --release-base "https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}" \
+            --merge-into base/manifest.json \
+            --metal-zip dist/whispercpp-metal-arm64.zip \
+            --out dist/manifest.json
+
+      # --- publish ----------------------------------------------------------------------
+      - name: Publish macOS assets + merged manifest to the Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Mynah-${{ steps.ver.outputs.version }}-macos-arm64.zip
+            dist/Mynah-macos-arm64.zip
+            dist/whispercpp-metal-arm64.zip
+            dist/manifest.json
+
+      - name: Upload macOS build artifacts (dry run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mynah-build-macos
+          path: |
+            dist/Mynah-*-macos-arm64.zip
+            dist/whispercpp-metal-arm64.zip
             dist/manifest.json

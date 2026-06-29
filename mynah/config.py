@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import re
+import sys
 from pathlib import Path
 
 try:  # Python 3.11+
@@ -17,6 +18,17 @@ except ModuleNotFoundError:  # pragma: no cover - 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
 from .platform_layer import config_path
+
+# Default push-to-talk / toggle hotkeys, per OS. On Windows the F9/F10 row keys are free and
+# easy. On macOS the top-row F-keys default to media keys (need Fn), and common chords like
+# ctrl+space collide with app shortcuts (e.g. VS Code suggestions / input-source switch) —
+# so the mac defaults are conflict-free Space chords that don't need Fn.
+if sys.platform == "darwin":
+    _DEFAULT_PTT = "cmd+shift+space"     # hold to dictate
+    _DEFAULT_TOGGLE = "ctrl+shift+space"  # tap on/off
+else:
+    _DEFAULT_PTT = "f9"
+    _DEFAULT_TOGGLE = "f10"
 
 DEFAULTS: dict = {
     "model": {
@@ -35,11 +47,11 @@ DEFAULTS: dict = {
     "hardware": {
         # Which whisper.cpp engine pack to run. auto = best installed (default GPU = Vulkan for
         # every vendor; CPU floor). Override to pin vulkan | cuda | cpu.
-        "backend": "auto",         # auto | vulkan | cuda | cpu
+        "backend": "auto",         # auto | vulkan | cuda | metal | cpu
     },
     "hotkey": {
-        "push_to_talk": "f9",   # hold to record, release to transcribe (walkie-talkie)
-        "toggle": "f10",        # tap to start, tap again to stop (hands-free switch)
+        "push_to_talk": _DEFAULT_PTT,   # hold to record, release to transcribe (walkie-talkie)
+        "toggle": _DEFAULT_TOGGLE,      # tap to start, tap again to stop (hands-free switch)
         "multilingual": "",     # optional: tap to toggle multilingual mode ("" = disabled)
         "wakeword": "",         # optional: tap to toggle wake-word listening mode ("" = disabled)
     },
@@ -62,7 +74,9 @@ DEFAULTS: dict = {
         "enabled": False,
         "phrase": "hey mynah",       # say this to start dictating; a carrier word ("hey") is most reliable
         "sensitivity": 0.5,        # 0..1 — higher = easier to trigger (and looser phrase match)
-        "silence_ms": 900,         # "stop delay": end an utterance after this much trailing silence
+        "silence_ms": 1500,        # "stop delay": end an utterance after this much trailing
+                                   # silence. 1.5s tolerates natural thinking pauses; raise toward
+                                   # 2500 if it still cuts you off, lower for a snappier finish.
         "max_seconds": 120,        # safety cap on one hands-free dictation; it normally ends on
                                    # silence (stop delay) well before this — not a fixed timer
 
@@ -90,9 +104,10 @@ device = "auto"                 # auto | cuda | cpu (also selects GPU vs CPU for
 # compute_type / vad / beam_size are legacy faster-whisper knobs and are ignored by whisper.cpp.
 
 [hardware]
-# Which engine pack to run. auto = best installed (default GPU backend = Vulkan for every
-# vendor; CPU fallback). Pin vulkan | cuda | cpu to override detection.
-backend = "auto"                # auto | vulkan | cuda | cpu
+# Which engine pack to run. auto = best installed (default GPU backend = Vulkan on PC for
+# every vendor, Metal on Apple Silicon; CPU fallback). Pin vulkan | cuda | metal | cpu to
+# override detection.
+backend = "auto"                # auto | vulkan | cuda | metal | cpu
 
 [language]
 mode = "auto"                   # auto | fixed
@@ -104,9 +119,10 @@ multilingual = true
 
 [hotkey]
 # Two independent triggers (use one or both). Each is a single key or combo,
-# e.g. "f9", "ctrl+space", "ctrl+alt+d". Set to "" to disable that one.
-push_to_talk = "f9"   # hold to record, release to transcribe (walkie-talkie style)
-toggle = "f10"        # tap once to start, tap again to stop (hands-free switch)
+# e.g. "f9", "cmd+shift+space", "ctrl+alt+d". Set to "" to disable that one.
+# (macOS defaults to Space chords; the F-key row there needs Fn and collides with media keys.)
+push_to_talk = "{ptt}"   # hold to record, release to transcribe (walkie-talkie style)
+toggle = "{toggle}"        # tap once to start, tap again to stop (hands-free switch)
 multilingual = ""     # optional: tap to toggle multilingual mode on/off ("" = disabled)
 wakeword = ""         # optional: tap to toggle wake-word listening mode on/off ("" = disabled)
 
@@ -135,7 +151,7 @@ min_clip_ms = 300               # ignore accidental taps shorter than this
 enabled = false
 phrase = "hey mynah"             # a carrier word ("hey …") is the most reliable; bare words mis-hear
 sensitivity = 0.5              # 0..1 — higher triggers more easily (and matches more loosely)
-silence_ms = 900              # "stop delay": finish a phrase after this much trailing silence (max ~3000)
+silence_ms = 1500             # "stop delay": finish a phrase after this much trailing silence (≈500–3000; raise if cut off)
 max_seconds = 120             # safety cap on one hands-free dictation (it ends on silence first)
 """
 
@@ -160,13 +176,20 @@ def load_config(path: str | Path | None = None) -> dict:
     return cfg
 
 
+def _rendered_default_template() -> str:
+    """The config template with the per-OS default hotkeys filled in (see DEFAULTS)."""
+    return (DEFAULT_CONFIG_TEMPLATE
+            .replace("{ptt}", _DEFAULT_PTT)
+            .replace("{toggle}", _DEFAULT_TOGGLE))
+
+
 def write_default_config(path: str | Path | None = None, force: bool = False) -> Path:
     """Write the commented default config; returns the path. Won't clobber unless forced."""
     p = Path(path) if path else config_path()
     if p.exists() and not force:
         return p
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
+    p.write_text(_rendered_default_template(), encoding="utf-8")
     return p
 
 

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import __version__
 from .config import DEFAULTS, update_config_values, write_default_config
@@ -87,15 +88,44 @@ def _open_path(path) -> None:
         subprocess.Popen(["xdg-open", path])
 
 
+class _NullTray:
+    """A do-nothing tray used in **settings-only** mode (the macOS Settings subprocess).
+
+    The Settings facade calls ``self.tray.notify`` / ``refresh_menu`` / ``set_status`` freely;
+    in the subprocess there is no menu-bar icon (the parent process owns it), so these become
+    no-ops. ``notify`` falls back to a printed line so download/error feedback isn't lost."""
+
+    def notify(self, message: str, title: str = "Mynah") -> None:
+        print(f"[{title}] {message}")
+
+    def refresh_menu(self) -> None:
+        pass
+
+    def set_status(self, status: str) -> None:
+        pass
+
+    def set_capturing(self, on: bool) -> None:
+        pass
+
+    def run(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
 class MynahApp:
     version = __version__
 
-    def __init__(self, cfg: dict, cfgpath) -> None:
+    def __init__(self, cfg: dict, cfgpath, settings_only: bool = False) -> None:
         self.cfg = cfg
         self.cfgpath = cfgpath
+        # settings_only: the macOS Settings subprocess. No controller (so no mic/hotkeys), no
+        # menu-bar icon, and downloads persist config without loading the engine in-process —
+        # the parent menu-bar process picks the change up via its config watcher and (re)loads.
+        self._settings_only = settings_only
 
         # Heavy imports kept local so `--help` etc. don't drag in the GPU stack.
-        from .controller import Controller
         from .transcriber import set_backend
 
         # Tell the engine-dir resolver which whisper.cpp pack to run.
@@ -115,14 +145,21 @@ class MynahApp:
         self._progress = {"active": False, "done": 0, "total": None, "text": ""}
         self._progress_lock = threading.Lock()
         self._recommended = None         # cached (backend, model, reason) from the probe
+        self._cfg_mtime = self._config_mtime()  # for the darwin external-config watcher
 
-        self.controller = Controller(cfg, transcriber=None)
-        self.controller.on_no_model = self._no_model_prompt
+        if settings_only:
+            self.controller = None
+            self.tray = _NullTray()
+        else:
+            from .controller import Controller
 
-        from .tray import Tray
+            self.controller = Controller(cfg, transcriber=None)
+            self.controller.on_no_model = self._no_model_prompt
 
-        self.tray = Tray(self)
-        self.controller.set_status_callback(self.tray.set_status)
+            from .tray import Tray
+
+            self.tray = Tray(self)
+            self.controller.set_status_callback(self.tray.set_status)
 
         self._switching = threading.Lock()  # guards a model swap / first load in progress
 
@@ -152,15 +189,156 @@ class MynahApp:
         self._wake_hk_spec = cfg["hotkey"].get("wakeword", "")
         self._wake_hk = None
 
+        self._settings_proc = None  # darwin: the Settings subprocess (Popen), if open
+
+    # --- config watcher (macOS: pick up the Settings subprocess's changes) --
+
+    def _config_mtime(self) -> float:
+        try:
+            return Path(self.cfgpath).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _watch_config(self) -> None:
+        """macOS only: the Settings window runs in a **separate process** (Tk needs its own
+        main thread), so it edits ``config.toml`` out-of-band. Poll the file's mtime and, when
+        it changes, reload model/language/sound/multilingual into the live menu-bar app so the
+        two stay in sync — the same role the in-process Settings poll plays on Windows."""
+        while True:
+            time.sleep(1.0)
+            mt = self._config_mtime()
+            if mt and mt != self._cfg_mtime:
+                self._cfg_mtime = mt
+                try:
+                    self._reload_from_disk()
+                except Exception as e:
+                    print(f"! couldn't apply external config change: {e}")
+
+    def _reload_from_disk(self) -> None:
+        """Re-read config.toml and apply any changed runtime settings (model, language, sound,
+        multilingual, backend). Called by the darwin config watcher after the Settings
+        subprocess saves."""
+        from .config import load_config
+        from .transcriber import set_backend
+
+        new = load_config(self.cfgpath)
+        # Backend / model: re-point the engine resolver and reload if either changed.
+        new_backend = new.get("hardware", {}).get("backend", "auto")
+        old_backend = self.cfg.get("hardware", {}).get("backend", "auto")
+        set_backend(new_backend)
+        new_model = new.get("model", {}).get("name")
+        model_changed = bool(new_model) and new_model != self.cfg["model"].get("name")
+        backend_changed = new_backend != old_backend
+        if model_changed or backend_changed:
+            if new_model:
+                self.cfg["model"]["name"] = new_model
+            self.cfg.setdefault("hardware", {}).update(new.get("hardware", {}))
+            target = new_model or self.cfg["model"]["name"]
+            if self._switching.acquire(blocking=False):
+                self._model_ready = False  # backend change needs a rebuild on the new pack
+                threading.Thread(target=self._load_and_swap, args=(target,),
+                                 daemon=True).start()
+        # Language.
+        lang = new.get("language", {})
+        code = lang.get("fixed") if lang.get("mode") == "fixed" else None
+        if code != self.controller.language:
+            self.controller.set_language(code)
+            self.cfg["language"].update(lang)
+        # Sound cues.
+        snd = bool(new.get("ux", {}).get("sound_cues", True))
+        if snd != self.controller.sound_cues:
+            self.controller.set_sound_cues(snd)
+            self.cfg["ux"]["sound_cues"] = snd
+        # Multilingual.
+        ml = bool(new.get("language", {}).get("multilingual", False))
+        if ml != self.controller.multilingual:
+            self.controller.set_multilingual(ml)
+            self.cfg["language"]["multilingual"] = ml
+        # Hotkeys — re-arm any that changed (the Settings subprocess writes the new spec to
+        # config but can't touch this process's live listeners).
+        new_hk = new.get("hotkey", {})
+        for kind in self._hk:
+            key = self._hk[kind]["key"]
+            spec = new_hk.get(key)
+            if spec is not None and _normalize_spec(spec) != _normalize_spec(self._hk[kind]["spec"]):
+                self._hk[kind]["spec"] = spec
+                self._arm(kind)
+        # Wake word — the Settings subprocess can only persist intent; start/stop the actual
+        # listener here in the live app when the enabled flag flips. Also apply tunables live.
+        wk = new.get("wakeword", {})
+        new_wake = bool(wk.get("enabled", False))
+        self.cfg.setdefault("wakeword", {}).update(wk)
+        if new_wake != self._wakeword_enabled:
+            self._wakeword_enabled = new_wake
+            if new_wake:
+                if self.wakeword_available():
+                    self._start_wakeword()
+                else:
+                    self.tray.notify("Download a model first, then enable listening mode.",
+                                     "Mynah")
+            else:
+                self._stop_wakeword()
+        elif self._wakeword is not None:
+            # already running — push live tunables
+            try:
+                self._wakeword.set_phrase(wk.get("phrase", self.wakeword_phrase()))
+                self._wakeword.set_sensitivity(self.wakeword_sensitivity())
+                self._wakeword.set_silence_ms(self.wakeword_silence_ms())
+            except Exception:
+                pass
+        self.tray.refresh_menu()
+
+    def _wait_until_trusted(self, timeout: float = 8.0) -> bool:
+        """macOS: block (briefly) until the process is Accessibility-trusted, so the hotkey tap
+        is created in a trusted context. Returns the final trust state. Never raises."""
+        try:
+            from .permissions import _accessibility_state
+        except Exception:
+            return True
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if _accessibility_state() == "granted":
+                return True
+            time.sleep(0.25)
+        # Not trusted within the window — arm anyway; pynput will warn and the user can grant +
+        # the 2.5s re-arm / config watcher will pick it up on the next change.
+        print("! Accessibility not granted yet — hotkeys may not fire until it's enabled in "
+              "System Settings → Privacy & Security → Accessibility (then they re-arm).")
+        return False
+
+    def _rearm_hotkeys(self) -> None:
+        """Restart the PTT/toggle listeners (and the optional multilingual/wakeword ones). Used
+        on macOS shortly after launch so a tap created before TCC trust settled is replaced by a
+        working one."""
+        try:
+            self._arm("ptt")
+            self._arm("toggle")
+        except Exception as e:
+            print(f"! re-arm hotkeys failed: {e}")
+
     # --- lifecycle ----------------------------------------------------------
 
     def run(self) -> int:
         self.controller.start()
+        # macOS: keep the menu-bar app in sync with the out-of-process Settings window.
+        if sys.platform == "darwin":
+            threading.Thread(target=self._watch_config, daemon=True).start()
+            # When launched via LaunchServices (Finder / `open` / menu bar), TCC's
+            # Accessibility/Input-Monitoring trust for the fresh process can lag a beat. pynput's
+            # global key listener checks trust *once* at start and silently produces no event tap
+            # if it reads False — so the hotkeys never fire even though the grant is in place.
+            # Wait until the process is actually trusted before arming, then re-arm on a short
+            # delay as a belt-and-braces against the cache reading stale-False at t=0.
+            self._wait_until_trusted(timeout=8.0)
 
         self._arm("ptt")
         self._arm("toggle")
         self._arm_multilingual_hotkey()
         self._arm_wakeword_hotkey()
+        if sys.platform == "darwin":
+            # Re-arm shortly after launch in case the very first tap was created before trust
+            # settled (it would silently receive nothing). Cheap and idempotent.
+            threading.Timer(2.5, self._rearm_hotkeys).start()
         if not any(info["listener"] for info in self._hk.values()):
             print("X No usable hotkey could be registered.")
             self.controller.stop()
@@ -220,16 +398,52 @@ class MynahApp:
         print("\nShutting down...")
         if self._settings is not None:
             self._settings.close()
+        # macOS: the Settings window is a separate process — terminate it so it doesn't linger
+        # after the menu-bar app quits.
+        proc = self._settings_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
         self.tray.stop()  # unblocks run(); cleanup happens in its finally
 
     def open_settings(self, setup: bool = False) -> None:
         """Open (or focus) the persistent settings window. ``setup=True`` shows the first-run
-        welcome banner + the recommended model."""
+        welcome banner + the recommended model.
+
+        On macOS the window runs in a **separate process** (``mynah --settings``): the menu-bar
+        app owns this process's main thread (pystray/AppKit), and macOS can't run a Tk loop off
+        the main thread or alongside another UI run loop in one process. The subprocess edits
+        the same ``config.toml``; the running app reflects those changes via :meth:`_watch_config`.
+        Elsewhere the window opens in-process on its own thread (the Windows behaviour)."""
+        if sys.platform == "darwin":
+            self._open_settings_subprocess(setup=setup)
+            return
         from .settings_window import SettingsWindow
 
         if self._settings is None:
             self._settings = SettingsWindow(self)
         self._settings.show(setup=setup)
+
+    def _open_settings_subprocess(self, setup: bool = False) -> None:
+        """macOS: launch (or focus) the Settings window as its own process."""
+        proc = self._settings_proc
+        if proc is not None and proc.poll() is None:
+            return  # already open — leave it; the user can switch to its window
+        if getattr(sys, "frozen", False):
+            # In the .app bundle, re-exec the same executable with --settings.
+            cmd = [sys.executable, "--settings"]
+        else:
+            cmd = [sys.executable, "-m", "mynah", "--settings"]
+        if setup:
+            cmd.append("--first-run-setup")
+        if self.cfgpath:
+            cmd += ["--config", str(self.cfgpath)]
+        try:
+            self._settings_proc = subprocess.Popen(cmd)
+        except Exception as e:
+            print(f"! couldn't open Settings window: {e}")
 
     # --- facade used by the tray --------------------------------------------
 
@@ -300,6 +514,17 @@ class MynahApp:
         print(f"! {msg}")
 
     def select_model(self, name: str) -> None:
+        # Settings-only (macOS subprocess): don't load the model here — that's the live
+        # menu-bar app's job. Just persist the choice; its config watcher reloads. (Loading in
+        # this process would spawn a second whisper-server and crash on the absent controller.)
+        if self.controller is None:
+            self.cfg["model"]["name"] = name
+            try:
+                update_config_values({"model": {"name": name}}, self.cfgpath)
+            except Exception as e:
+                print(f"! couldn't save model choice: {e}")
+            self._progress_done(f"{name} selected — the app will switch to it.")
+            return
         if name == self.current_model() and self._model_ready:
             return
         if not self._switching.acquire(blocking=False):
@@ -415,11 +640,17 @@ class MynahApp:
 
     # backend selector ----------------------------------------------------
 
-    _BACKEND_LABELS = [("Auto (recommended)", "auto"), ("Vulkan — any GPU", "vulkan"),
-                       ("NVIDIA CUDA", "cuda"), ("CPU", "cpu")]
+    # macOS exposes only Metal (the Apple GPU backend) + CPU; Windows/Linux expose Vulkan
+    # (default) + the optional NVIDIA CUDA upgrade + CPU. "Auto" picks the best installed.
+    _BACKEND_LABELS_DARWIN = [("Auto (recommended)", "auto"),
+                              ("Metal — Apple GPU", "metal"), ("CPU", "cpu")]
+    _BACKEND_LABELS_PC = [("Auto (recommended)", "auto"), ("Vulkan — any GPU", "vulkan"),
+                          ("NVIDIA CUDA", "cuda"), ("CPU", "cpu")]
 
     def backend_choices(self) -> list[tuple[str, str]]:
-        return list(self._BACKEND_LABELS)
+        if sys.platform == "darwin":
+            return list(self._BACKEND_LABELS_DARWIN)
+        return list(self._BACKEND_LABELS_PC)
 
     def current_backend(self) -> str:
         return self.cfg.get("hardware", {}).get("backend", "auto")
@@ -468,8 +699,10 @@ class MynahApp:
             # An explicit (non-auto) pick must NOT silently degrade to CPU — surface the failure
             # so the user knows Vulkan/CUDA didn't actually install (only "auto" may fall back).
             self._ensure_engine(backend, allow_cpu_fallback=(value == "auto"))
-            # If a model is already chosen, restart the engine on the new backend.
-            if self._model_ready or self._model_available():
+            # If a model is already chosen, restart the engine on the new backend — but only in
+            # the live app. In the settings-only subprocess there's no engine to restart; persist
+            # the choice and let the menu-bar app's config watcher reload on the new backend.
+            if self.controller is not None and (self._model_ready or self._model_available()):
                 self._model_ready = False  # force a reload on the new build
                 self._reload_current()
             # Engine is in place — now it's safe to persist the choice.
@@ -532,6 +765,10 @@ class MynahApp:
         return self.current_model()
 
     def is_active_model(self, name: str) -> bool:
+        # Settings-only (macOS subprocess) has no live engine, so "active" = the model the
+        # config selects (what the menu-bar app runs). In the live app it's the loaded one.
+        if self.controller is None:
+            return name == self.current_model()
         return self._model_ready and name == self.active_model_name()
 
     def download_model(self, name: str) -> None:
@@ -556,6 +793,12 @@ class MynahApp:
                 update_config_values({"model": {"name": name}}, self.cfgpath)
             except Exception:
                 pass
+            # Settings-only (macOS subprocess): don't load the engine here — the live menu-bar
+            # app does that when its config watcher sees the new model. Loading here would spawn
+            # a second whisper-server and touch the absent controller.
+            if self.controller is None:
+                self._progress_done(f"{name} installed — the app will load it.")
+                return
             self._progress_done(f"{name} ready — loading…")
             self._model_ready = False
             self._reload_current()
@@ -637,10 +880,14 @@ class MynahApp:
         return choices
 
     def current_language(self) -> str | None:
+        if self.controller is None:
+            lang = self.cfg.get("language", {})
+            return lang.get("fixed") if lang.get("mode") == "fixed" else None
         return self.controller.language
 
     def select_language(self, code: str | None) -> None:
-        self.controller.set_language(code)
+        if self.controller is not None:
+            self.controller.set_language(code)
         if code is None:
             self.cfg["language"]["mode"] = "auto"
             updates = {"language": {"mode": "auto"}}
@@ -655,11 +902,15 @@ class MynahApp:
         self.tray.refresh_menu()
 
     def sound_enabled(self) -> bool:
+        if self.controller is None:
+            return bool(self.cfg.get("ux", {}).get("sound_cues", True))
         return self.controller.sound_cues
 
     def toggle_sound(self) -> None:
-        self.controller.set_sound_cues(not self.controller.sound_cues)
-        enabled = self.controller.sound_cues
+        enabled = not self.sound_enabled()
+        if self.controller is not None:
+            self.controller.set_sound_cues(enabled)
+            enabled = self.controller.sound_cues
         self.cfg["ux"]["sound_cues"] = enabled
         try:
             update_config_values({"ux": {"sound_cues": enabled}}, self.cfgpath)
@@ -668,11 +919,14 @@ class MynahApp:
         self.tray.refresh_menu()
 
     def multilingual_enabled(self) -> bool:
+        if self.controller is None:
+            return bool(self.cfg.get("language", {}).get("multilingual", False))
         return self.controller.multilingual
 
     def toggle_multilingual(self) -> None:
-        enabled = not self.controller.multilingual
-        self.controller.set_multilingual(enabled)
+        enabled = not self.multilingual_enabled()
+        if self.controller is not None:
+            self.controller.set_multilingual(enabled)
         self.cfg["language"]["multilingual"] = enabled
         try:
             update_config_values({"language": {"multilingual": enabled}}, self.cfgpath)
@@ -726,6 +980,11 @@ class MynahApp:
             update_config_values({"wakeword": {"enabled": enabled}}, self.cfgpath)
         except Exception as e:
             print(f"! couldn't save wake-word setting: {e}")
+        # Settings-only (macOS subprocess): just persist intent — the live menu-bar process
+        # starts/stops the actual listener when it picks up the config change.
+        if self.controller is None:
+            self.tray.refresh_menu()
+            return
         if enabled:
             if self.wakeword_available():
                 self._start_wakeword()
@@ -792,6 +1051,11 @@ class MynahApp:
             bdir = str(whispercpp_binary_dir(self.cfg["model"]))
             tiny = str(lid_model_path("tiny"))
             spotter = TinyWhisperSpotter(bdir, tiny, samplerate=self.controller.samplerate)
+            # Mute the mic only long enough to swallow the start cue; if sound cues are off,
+            # there's nothing to swallow, so listen immediately (mute = 0).
+            from .wakeword import _POST_WAKE_MUTE_S
+
+            mute_s = _POST_WAKE_MUTE_S if self.controller.sound_cues else 0.0
             listener = WakeWordListener(
                 spotter=spotter,
                 phrase=wk.get("phrase", "hey mynah"),
@@ -803,8 +1067,9 @@ class MynahApp:
                 on_abort=self.controller.on_wakeword_abort,
                 on_ready=self._on_wakeword_ready,
                 is_blocked=self.controller.is_busy,
-                silence_ms=int(wk.get("silence_ms", 900)),
+                silence_ms=int(wk.get("silence_ms", 1500)),
                 max_dictation_s=float(wk.get("max_seconds", 120)),
+                post_wake_mute_s=mute_s,
             )
             listener.start()
             self._wakeword = listener
@@ -819,8 +1084,9 @@ class MynahApp:
     def _stop_wakeword(self) -> None:
         lis = self._wakeword
         self._wakeword = None
-        self.controller.wake_is_capturing = None
-        self.controller.wake_interrupt = None
+        if self.controller is not None:
+            self.controller.wake_is_capturing = None
+            self.controller.wake_interrupt = None
         if lis is not None:
             try:
                 lis.stop()
@@ -865,7 +1131,13 @@ class MynahApp:
         return _normalize_spec(info["spec"]) == _normalize_spec(info["default"])
 
     def _arm(self, kind: str) -> bool:
-        """(Re)start one hotkey listener from its current spec. "" disables it."""
+        """(Re)start one hotkey listener from its current spec. "" disables it.
+
+        Settings-only mode has no controller to bind to and doesn't own the live hotkeys (the
+        menu-bar process does), so arming is a no-op success — the spec is still validated by
+        the capture step and persisted to config for the live process to pick up."""
+        if self.controller is None:
+            return True
         from .hotkey import PushToTalkHotkey, ToggleHotkey
 
         info = self._hk[kind]
@@ -960,7 +1232,51 @@ class MynahApp:
             lambda spec: self._on_captured(kind, spec),
             lambda: self._on_capture_cancel(kind),
         )
-        self._capture.start()
+        try:
+            self._capture.start()
+        except Exception as e:
+            # Starting the global key listener can fail (e.g. macOS Input Monitoring not granted
+            # for this process). Don't let it bubble into the Tk button callback and crash the
+            # Settings window — back out cleanly and tell the user.
+            print(f"X couldn't start hotkey capture: {e}")
+            self._capture = None
+            self._capturing = None
+            self.tray.set_capturing(False)
+            self.tray.notify(
+                "Couldn't capture a shortcut — grant Input Monitoring to Mynah in "
+                "System Settings → Privacy & Security, then try again.", "Mynah · hotkey")
+
+    def set_hotkey(self, kind: str, spec: str) -> bool:
+        """Validate + persist a hotkey spec directly (no key-capture listener). Used by the
+        macOS Settings window's Tk-native capture, which already produced the spec string.
+        Returns True if accepted. Arms the live listener too when a controller is present."""
+        from .hotkey import parse_hotkey
+
+        if kind not in self._hk or not spec:
+            return False
+        try:
+            parse_hotkey(spec)  # reject an unparseable combo before saving
+        except Exception as e:
+            print(f"! ignoring invalid hotkey {spec!r}: {e}")
+            self.tray.notify(f"Couldn't use '{spec}'.", "Mynah · hotkey")
+            return False
+        info = self._hk[kind]
+        prev = info["spec"]
+        info["spec"] = spec
+        if self.controller is not None and not self._arm(kind):  # invalid for the live listener
+            info["spec"] = prev
+            self._arm(kind)
+            self.tray.notify(f"Couldn't use that shortcut — kept {_describe_spec(prev)}.",
+                             "Mynah · hotkey")
+            return False
+        try:
+            update_config_values({"hotkey": {info["key"]: spec}}, self.cfgpath)
+        except Exception as e:
+            print(f"! couldn't save hotkey: {e}")
+        self.tray.notify(f"{info['label']} set to {_describe_spec(spec)}.", "Mynah · hotkey")
+        print(f"{info['label']} set to [{_describe_spec(spec)}].")
+        self.tray.refresh_menu()
+        return True
 
     def _on_captured(self, kind: str, spec: str) -> None:
         self._capture = None
@@ -1041,3 +1357,30 @@ def run_tray(cfg: dict, args: argparse.Namespace) -> int:
         print(f"X Failed to start: {e}")
         return 1
     return app.run()
+
+
+def run_settings_process(cfg: dict, cfgpath, setup: bool = False) -> int:
+    """Entry point for the macOS Settings subprocess (``mynah --settings``).
+
+    Builds a settings-only :class:`MynahApp` (no controller, no menu-bar icon — see
+    :class:`_NullTray`) and runs the Tk window on **this process's main thread** (where macOS
+    requires it). Model downloads / backend installs run here exactly as they do from the live
+    app; the result is persisted to ``config.toml``, which the running menu-bar app picks up via
+    its config watcher. Returns when the window closes."""
+    from .settings_window import SettingsWindow
+
+    try:
+        app = MynahApp(cfg, cfgpath, settings_only=True)
+    except Exception as e:
+        print(f"X Failed to open Settings: {e}")
+        return 1
+    window = SettingsWindow(app)
+    window.run_blocking(setup=setup)
+    # A download/install runs on a background thread in THIS process. If the user closes the
+    # window mid-download, don't exit and kill it — wait for the in-flight op to finish (the
+    # menu-bar app picks up the result via its config watcher). The op holds `_busy`.
+    if app.is_busy():
+        print("Settings closed — finishing the download in the background…")
+        while app.is_busy():
+            time.sleep(0.5)
+    return 0

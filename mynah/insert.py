@@ -17,8 +17,24 @@ from .platform_layer import paste_modifier
 _keyboard = Controller()
 
 
+def _release_stray_modifiers() -> None:
+    """Release any modifier keys that might still be physically/logically held.
+
+    Push-to-talk chords (e.g. Cmd+Shift+Space) can still have Cmd/Shift down when the paste
+    fires shortly after release — turning our Cmd+V into Cmd+Shift+V (which doesn't paste). Best
+    effort: explicitly release the common modifiers before sending the paste chord."""
+    from pynput.keyboard import Key
+
+    for k in (Key.shift, Key.ctrl, Key.alt, Key.cmd):
+        try:
+            _keyboard.release(k)
+        except Exception:
+            pass
+
+
 def _press_paste() -> None:
     mod = paste_modifier()
+    _release_stray_modifiers()
     with _keyboard.pressed(mod):
         _keyboard.press(KeyCode.from_char("v"))
         _keyboard.release(KeyCode.from_char("v"))
