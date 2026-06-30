@@ -273,9 +273,12 @@ class MynahApp:
             if new_wake:
                 if self.wakeword_available():
                     self._start_wakeword()
+                elif self._engine_installed():
+                    threading.Thread(target=self._fetch_wake_weights_and_start,
+                                     daemon=True).start()
                 else:
-                    self.tray.notify("Download a model first, then enable listening mode.",
-                                     "Mynah")
+                    self.tray.notify("Finish setup (install a model) first, then enable "
+                                     "listening mode.", "Mynah")
             else:
                 self._stop_wakeword()
         elif self._wakeword is not None:
@@ -570,6 +573,12 @@ class MynahApp:
                     update_config_values({"model": {"name": name}}, self.cfgpath)
                 except Exception as e:
                     print(f"! couldn't save model choice: {e}")
+            # The wake word + multilingual gate need two small auxiliary weights (tiny LID +
+            # Silero VAD, ~78 MB) that aren't pulled with the main ASR model — so a user who
+            # already had a model in the HF cache (no model download step) would be missing them.
+            # Fetch them in the background now that the engine is up, so both features work out of
+            # the box instead of dead-ending later.
+            self._ensure_wake_weights_async()
             # Now that the engine build is present, preload multilingual (if enabled) and
             # start wake-word listening (if enabled — it shares the engine build + tiny model).
             self.controller.start_multilingual_preload()
@@ -945,17 +954,29 @@ class MynahApp:
         """The listener is actually up and listening on the mic."""
         return self._wakeword is not None and self._wakeword.is_ready
 
-    def wakeword_available(self) -> bool:
-        """Engine build + the tiny spotter model are present, so listening mode can start."""
-        from . import models
+    def _engine_installed(self) -> bool:
+        """The whisper.cpp engine build (whisper-server) for the active backend is present."""
         from .transcriber import whispercpp_binary_dir
 
         try:
             bdir = whispercpp_binary_dir(self.cfg["model"])
             exe = bdir / ("whisper-server.exe" if os.name == "nt" else "whisper-server")
-            return exe.is_file() and models.resolve_lid_model("tiny") is not None
+            return exe.is_file()
         except Exception:
             return False
+
+    def _wake_weights_present(self) -> bool:
+        """The tiny spotter model the wake word needs is present."""
+        from . import models
+
+        try:
+            return models.resolve_lid_model("tiny") is not None
+        except Exception:
+            return False
+
+    def wakeword_available(self) -> bool:
+        """Engine build + the tiny spotter model are present, so listening mode can start now."""
+        return self._engine_installed() and self._wake_weights_present()
 
     def wakeword_phrase(self) -> str:
         return self.cfg.get("wakeword", {}).get("phrase", "hey mynah")
@@ -988,13 +1009,81 @@ class MynahApp:
         if enabled:
             if self.wakeword_available():
                 self._start_wakeword()
+            elif self._engine_installed():
+                # Engine + a model are already here; only the tiny spotter weight (and Silero
+                # VAD) are missing. Don't dead-end — fetch them (~78 MB), then start. This is the
+                # path a user hits after installing only a large model: the wake word uses a
+                # separate tiny model, which wasn't pulled with it.
+                self.tray.notify("Getting the wake-word model…", "Mynah")
+                print("Wake word: fetching the tiny spotter weights…")
+                threading.Thread(target=self._fetch_wake_weights_and_start, daemon=True).start()
             else:
-                self.tray.notify("Download a model first, then enable listening mode.",
-                                 "Mynah")
-                print("! wake word needs an installed engine + model first.")
+                # No engine at all — genuine first-run setup is needed.
+                self.tray.notify("Finish setup (install a model) first, then enable listening "
+                                 "mode.", "Mynah")
+                print("! wake word needs the engine + a model installed first — open Settings.")
         else:
             self._stop_wakeword()
             print("Wake-word listening mode off.")
+        self.tray.refresh_menu()
+
+    def _ensure_wake_weights_async(self) -> None:
+        """Background, quiet: if the tiny LID + Silero VAD weights are missing, download them so
+        the wake word + multilingual gate work out of the box. No-op if already present. Skips if
+        a download/install is already running (e.g. an explicit toggle is fetching them)."""
+        if self._wake_weights_present() and self._vad_weight_present():
+            return
+        if not self._busy.acquire(blocking=False):
+            return  # something is already downloading; it'll cover these or the toggle will
+
+        def _work():
+            from . import models
+
+            try:
+                models.ensure_multilingual_weights(progress=self._progress_cb)
+                self._progress_done()
+            except Exception as e:
+                print(f"! couldn't fetch wake-word/multilingual weights: {e}")
+            finally:
+                self._busy.release()
+            # If the user wants the wake word and it's now possible, bring it up.
+            if self._wakeword_enabled and self._wakeword is None and self.wakeword_available():
+                self._start_wakeword()
+                self.tray.refresh_menu()
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _vad_weight_present(self) -> bool:
+        from . import models
+
+        try:
+            return models.resolve_vad_model() is not None
+        except Exception:
+            return False
+
+    def _fetch_wake_weights_and_start(self) -> None:
+        """Download the tiny LID + Silero VAD weights the wake word needs, then start listening.
+        Runs on a background thread (downloads). Guarded by the install lock so it doesn't race a
+        model download."""
+        from . import models
+
+        if not self._busy.acquire(blocking=False):
+            self.tray.notify("A download is in progress — try listening mode again after it "
+                             "finishes.", "Mynah")
+            return
+        try:
+            models.ensure_multilingual_weights(progress=self._progress_cb)
+            self._progress_done("Wake-word model ready.")
+        except Exception as e:
+            print(f"X couldn't fetch wake-word weights: {e}")
+            self._progress_done(f"Couldn't get the wake-word model: {e}")
+            self.tray.notify(f"Couldn't download the wake-word model: {e}", "Mynah")
+            return
+        finally:
+            self._busy.release()
+        # Only start if the user still wants it on and the weights are actually here now.
+        if self._wakeword_enabled and self.wakeword_available():
+            self._start_wakeword()
         self.tray.refresh_menu()
 
     def set_wakeword_phrase(self, phrase: str) -> None:
