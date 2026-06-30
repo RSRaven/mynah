@@ -436,7 +436,11 @@ class MynahApp:
         """macOS: launch (or focus) the Settings window as its own process."""
         proc = self._settings_proc
         if proc is not None and proc.poll() is None:
-            return  # already open — leave it; the user can switch to its window
+            # Already open — bring its window to the front instead of doing nothing (the user
+            # clicked Settings again expecting it to appear). The subprocess is a separate
+            # process, so raise it by PID via System Events.
+            self._focus_settings_window(proc.pid)
+            return
         if getattr(sys, "frozen", False):
             # In the .app bundle, re-exec the same executable with --settings.
             cmd = [sys.executable, "--settings"]
@@ -450,6 +454,17 @@ class MynahApp:
             self._settings_proc = subprocess.Popen(cmd)
         except Exception as e:
             print(f"! couldn't open Settings window: {e}")
+
+    def _focus_settings_window(self, pid: int) -> None:
+        """Bring the already-open Settings subprocess to the front (macOS). Best-effort: asks
+        System Events to raise the process by its PID, so a second Settings click surfaces the
+        existing window instead of silently doing nothing."""
+        script = (f'tell application "System Events" to set frontmost of '
+                  f'(first process whose unix id is {pid}) to true')
+        try:
+            subprocess.Popen(["osascript", "-e", script])
+        except Exception as e:
+            print(f"! couldn't focus the Settings window: {e}")
 
     # --- facade used by the tray --------------------------------------------
 

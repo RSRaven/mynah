@@ -56,9 +56,11 @@ if IS_MACOS:
     # framework binding is missing at runtime. HIServices is critical: pynput does
     # `import HIServices; HIServices.AXIsProcessTrusted()` to check the Accessibility grant, and
     # that symbol is a lazily-bound pyobjc constant whose metadata must be collected or the
-    # hotkey listener dies with `KeyError: 'AXIsProcessTrusted'`.
+    # hotkey listener dies with `KeyError: 'AXIsProcessTrusted'`. AVFoundation backs the
+    # Microphone-permission probe (permissions._microphone_state) — without it the Settings panel
+    # shows the mic grant as a permanent "? check" even when it's granted.
     for pkg in ("objc", "Quartz", "AppKit", "Foundation", "ApplicationServices",
-                "CoreFoundation", "HIServices", "PyObjCTools"):
+                "AVFoundation", "CoreFoundation", "HIServices", "PyObjCTools"):
         try:
             d, b, h = collect_all(pkg)
             datas += d
@@ -136,8 +138,8 @@ if IS_MACOS:
         info_plist={
             "CFBundleName": "Mynah",
             "CFBundleDisplayName": "Mynah",
-            "CFBundleShortVersionString": "0.5.1",
-            "CFBundleVersion": "0.5.1",
+            "CFBundleShortVersionString": "0.5.2",
+            "CFBundleVersion": "0.5.2",
             "LSUIElement": True,            # menu-bar agent, no Dock icon / app switcher entry
             "LSMinimumSystemVersion": "12.0",
             "NSMicrophoneUsageDescription":

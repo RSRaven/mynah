@@ -205,7 +205,7 @@ jobs:
       - name: Install Python build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pyinstaller pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices
+          pip install -e . pyinstaller pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices pyobjc-framework-AVFoundation
 
       # --- bundle the Metal pack into the .app (no engine download on first run) -----------
       - name: Stage engine pack (metal) into the bundle

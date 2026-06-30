@@ -143,8 +143,28 @@ class SettingsWindow:
                 root.iconphoto(True, self._icon_img)
         except Exception:
             pass
-        frm = ttk.Frame(root, padding=14)
-        frm.grid(sticky="nsew")
+        # Scrollable container: the window has grown (Models + Permissions + wake-word + hotkeys),
+        # and on a shorter display the bottom — including the Close button — could fall off-screen
+        # with no way to reach it. Hosting the content in a canvas + scrollbar (and clamping the
+        # window height in `_place`) guarantees every control, Close included, is always reachable.
+        root.rowconfigure(0, weight=1)
+        root.columnconfigure(0, weight=1)
+        outer = ttk.Frame(root)
+        outer.grid(row=0, column=0, sticky="nsew")
+        canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        frm = ttk.Frame(canvas, padding=14)
+        frm_id = canvas.create_window((0, 0), window=frm, anchor="nw")
+        # Keep the scroll region in sync with the content, and stretch the inner frame to the
+        # canvas width so the layout doesn't collapse to its minimum.
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(frm_id, width=e.width))
+        frm.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self._bind_mousewheel(canvas)
+        self._w["canvas"] = canvas
+        root.bind("<Escape>", lambda _e: self._on_close())  # safety net: always closable
         pad = {"padx": 8, "pady": 4}
         r = 0
 
@@ -432,19 +452,44 @@ class SettingsWindow:
         except Exception:
             pass
 
+    def _bind_mousewheel(self, canvas) -> None:
+        """Scroll the canvas with the wheel/trackpad while the pointer is over the window. Bound
+        on enter / unbound on leave so it doesn't hijack scrolling elsewhere. macOS delivers a
+        small delta (±1 per notch); Windows delivers ±120 — normalise both to a unit scroll."""
+        def on_wheel(event):
+            delta = event.delta
+            if delta == 0:
+                return
+            step = -1 if delta > 0 else 1
+            if abs(delta) >= 120:          # Windows: 120 per notch
+                step = int(-delta / 120)
+            canvas.yview_scroll(step, "units")
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", on_wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
     def _place(self, root) -> None:
-        """Restore last session position, else center on screen (not top-left)."""
+        """Restore last session position, else center on screen (not top-left).
+
+        Clamp the window height to the visible screen (minus room for the menu bar / dock) so the
+        bottom controls — Close included — are always on-screen; the content scrolls if it's
+        taller. Width is left at the natural request width."""
         root.update_idletasks()
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        reqw, reqh = root.winfo_reqwidth(), root.winfo_reqheight()
+        max_h = int(sh * 0.88)
+        h = min(reqh, max_h)
         if self._last_geometry:
             try:
+                # Honour the remembered position, but force a height that fits this screen (a
+                # geometry saved on a taller display must not push Close off a shorter one).
                 root.geometry(self._last_geometry)
+                root.update_idletasks()
+                root.geometry(f"{root.winfo_width()}x{h}")
                 return
             except Exception:
                 pass
-        w, h = root.winfo_reqwidth(), root.winfo_reqheight()
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        x, y = max(0, (sw - w) // 2), max(0, (sh - h) // 4)
-        root.geometry(f"+{x}+{y}")
+        x, y = max(0, (sw - reqw) // 2), max(0, (sh - h) // 4)
+        root.geometry(f"{reqw}x{h}+{x}+{y}")
 
     # --- callbacks ----------------------------------------------------------
 
