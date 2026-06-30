@@ -68,21 +68,26 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExe}"; Description: "Launch Mynah"; Tasks: launchafter; \
   Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-; 1) Silently remove engine runtime packs + config + logs + the autostart key. Runs while the
-;    app exe still exists (before [Files] are deleted).
-Filename: "{app}\{#MyAppExe}"; Parameters: "--purge-runtime"; Flags: runhidden waituntilterminated; \
-  RunOnceId: "PurgeRuntime"
-; 2) Ask, per-model, which downloaded models to delete from the shared cache (none by default).
-;    Check skips this GUI checklist on a silent uninstall — it would block with no one to click
-;    ([UninstallRun] has no skipifsilent flag, so gate it with UninstallSilent instead).
-Filename: "{app}\{#MyAppExe}"; Parameters: "--purge-ui"; Flags: waituntilterminated; \
-  RunOnceId: "PurgeModels"; Check: ModelCleanupWanted
-
 [Code]
-function ModelCleanupWanted: Boolean;
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
-  { Show the per-model delete checklist only on an interactive uninstall — never on a silent
-    /VERYSILENT one, where the GUI dialog would block with no one to click it. }
-  Result := not UninstallSilent;
+  { Run both purges while the app exe still exists (usUninstall fires before files are
+    deleted). This lives in Code rather than an UninstallRun entry because Inno evaluates
+    an UninstallRun entry's "Check:" while saving uninstall info during Setup, where the
+    uninstaller-only UninstallSilent function isn't callable and aborts the install. }
+  if CurUninstallStep = usUninstall then
+  begin
+    { 1) Silently remove engine runtime packs + config + logs + the autostart key (never
+         touches the shared model cache). }
+    Exec(ExpandConstant('{app}\{#MyAppExe}'), '--purge-runtime', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    { 2) Ask, per-model, which downloaded models to delete from the shared cache (none by
+         default). Shown only on an interactive uninstall — never on a silent /VERYSILENT one,
+         where the GUI checklist would block with no one to click it. }
+    if not UninstallSilent then
+      Exec(ExpandConstant('{app}\{#MyAppExe}'), '--purge-ui', '', SW_SHOW,
+        ewWaitUntilTerminated, ResultCode);
+  end;
 end;
