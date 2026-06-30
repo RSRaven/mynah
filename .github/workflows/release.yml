@@ -227,6 +227,17 @@ jobs:
           cd dist
           ditto -c -k --keepParent Mynah.app "Mynah-${{ steps.ver.outputs.version }}-macos-arm64.zip"
 
+      # --- DMG installer (styled drag-to-Applications window) ----------------------------
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build .dmg installer
+        run: |
+          bash scripts/make_dmg.sh \
+            dist/Mynah.app \
+            "dist/Mynah-${{ steps.ver.outputs.version }}-macos-arm64.dmg" \
+            "Mynah ${{ steps.ver.outputs.version }}"
+
       # --- merge Metal into the manifest the Windows job produced -------------------------
       - name: Download base manifest (vulkan + cpu + cuda)
         uses: actions/download-artifact@v4
@@ -244,11 +255,18 @@ jobs:
             --out dist/manifest.json
 
       # --- publish ----------------------------------------------------------------------
+      # macOS runs last (needs: build), so it sets the release body — a guide to every asset.
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/release_notes.py --version "${{ steps.ver.outputs.version }}" > dist/RELEASE_NOTES.md
+
       - name: Publish macOS assets + merged manifest to the Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/RELEASE_NOTES.md
           files: |
+            dist/Mynah-${{ steps.ver.outputs.version }}-macos-arm64.dmg
             dist/Mynah-${{ steps.ver.outputs.version }}-macos-arm64.zip
             dist/whispercpp-metal-arm64.zip
             dist/manifest.json
@@ -259,6 +277,7 @@ jobs:
         with:
           name: mynah-build-macos
           path: |
+            dist/Mynah-*-macos-arm64.dmg
             dist/Mynah-*-macos-arm64.zip
             dist/whispercpp-metal-arm64.zip
             dist/manifest.json

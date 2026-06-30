@@ -35,6 +35,19 @@ SETTINGS_URLS = {
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
 }
 
+# The .app bundle identifier (matches mynah.spec's CFBundleIdentifier). `tccutil reset` keys off
+# this to clear the grants tied to a given app, regardless of which build's code identity wrote
+# them.
+BUNDLE_ID = "com.mynah.mynah"
+
+# Our permission keys -> the service name `tccutil reset <service>` expects. (Input Monitoring's
+# TCC service is "ListenEvent"; Accessibility's is "Accessibility"; Microphone's is "Microphone".)
+_TCC_SERVICE = {
+    "microphone": "Microphone",
+    "input_monitoring": "ListenEvent",
+    "accessibility": "Accessibility",
+}
+
 # state ∈ {"granted", "denied", "unknown"}. "unknown" = couldn't detect (no pyobjc, or an API
 # that has no preflight) — treat as "probably needs a look" in the UI, never as a hard fail.
 _GRANTED = "granted"
@@ -178,6 +191,36 @@ def open_settings_pane(key: str) -> None:
         subprocess.Popen(["open", url])
     except Exception:
         pass
+
+
+def reset_permissions(keys: list[str] | None = None) -> bool:
+    """Clear the TCC grants bound to Mynah's bundle id via ``tccutil reset``.
+
+    This is the cure for the **stale-grant-after-update** trap: macOS ties a grant to the app's
+    *code identity*, and our CI ``.app`` is ad-hoc signed (a new identity every build), so an old
+    grant silently stops applying after an update — transcription works but the Cmd+V paste does
+    nothing. Resetting forces macOS to forget the old entries so the next launch re-prompts (and
+    the user re-adds the *current* build). Best-effort: never raises; returns whether at least one
+    reset command succeeded. No-op (returns False) off macOS.
+
+    ``keys`` defaults to all three permissions; pass a subset (e.g. ``["accessibility"]``) to
+    reset just one."""
+    if not is_macos():
+        return False
+    keys = keys or list(_TCC_SERVICE.keys())
+    ok = False
+    for key in keys:
+        service = _TCC_SERVICE.get(key)
+        if not service:
+            continue
+        try:
+            # `tccutil reset <service> <bundle-id>` clears that grant for just this app.
+            res = subprocess.run(["tccutil", "reset", service, BUNDLE_ID],
+                                 capture_output=True, timeout=10)
+            ok = ok or res.returncode == 0
+        except Exception:
+            pass
+    return ok
 
 
 def summary_text() -> str:

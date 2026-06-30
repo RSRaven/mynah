@@ -342,6 +342,9 @@ class MynahApp:
             # Re-arm shortly after launch in case the very first tap was created before trust
             # settled (it would silently receive nothing). Cheap and idempotent.
             threading.Timer(2.5, self._rearm_hotkeys).start()
+            # If Accessibility still isn't granted, the paste will silently do nothing — nudge
+            # the user (common right after an update: grants are tied to the old build's identity).
+            self._nudge_permissions_if_needed()
         if not any(info["listener"] for info in self._hk.values()):
             print("X No usable hotkey could be registered.")
             self.controller.stop()
@@ -646,6 +649,71 @@ class MynahApp:
         if not comp:
             return None
         return (comp.get("license_note", ""), comp.get("license_url", ""))
+
+    # macOS permissions ---------------------------------------------------
+
+    def permissions_supported(self) -> bool:
+        """True only on macOS, where the three TCC grants gate the core loop. Off macOS the
+        Settings panel hides the whole section."""
+        return sys.platform == "darwin"
+
+    def permission_rows(self) -> list[dict]:
+        """Current state of the macOS grants for the Settings panel: one dict per permission
+        with ``key`` / ``label`` / ``state`` (granted|denied|unknown) / ``why``. Empty off
+        macOS."""
+        try:
+            from .permissions import check_permissions
+        except Exception:
+            return []
+        return [{"key": p.key, "label": p.label, "state": p.state, "why": p.why}
+                for p in check_permissions()]
+
+    def open_permission_pane(self, key: str) -> None:
+        """Open System Settings at the privacy pane for ``key`` so the user can flip the grant."""
+        try:
+            from .permissions import open_settings_pane
+
+            open_settings_pane(key)
+        except Exception as e:
+            print(f"! couldn't open the {key} settings pane: {e}")
+
+    def reset_permissions(self) -> None:
+        """Clear Mynah's stale TCC grants (the after-update Cmd+V-does-nothing trap), then tell
+        the user to re-grant + relaunch. The grants are tied to a code identity that changes
+        every build, so a reset is the reliable way to recover."""
+        try:
+            from .permissions import reset_permissions as _reset
+
+            did = _reset()
+        except Exception as e:
+            print(f"! permission reset failed: {e}")
+            did = False
+        if did:
+            self.tray.notify(
+                "Permissions reset. Re-open Mynah, then re-enable it under Accessibility and "
+                "Input Monitoring in System Settings → Privacy & Security.", "Mynah")
+        else:
+            # Reset didn't run (or nothing to clear) — still point the user at the pane to fix it.
+            self.open_permission_pane("accessibility")
+            self.tray.notify(
+                "Enable Mynah under Accessibility (and Input Monitoring) in System Settings → "
+                "Privacy & Security, then relaunch.", "Mynah")
+
+    def _nudge_permissions_if_needed(self) -> None:
+        """macOS startup nudge: if Accessibility isn't granted, the paste will silently no-op —
+        so surface a notification (and the fix lives in Settings → Permissions). Called once the
+        trust wait has settled, so a freshly-granted build doesn't false-alarm."""
+        if sys.platform != "darwin":
+            return
+        try:
+            from .permissions import _accessibility_state
+        except Exception:
+            return
+        if _accessibility_state() != "granted":
+            self.tray.notify(
+                "Mynah can hear you but can't paste yet — enable Accessibility for Mynah in "
+                "System Settings → Privacy & Security (Settings → Permissions has a Reset "
+                "button if you just updated).", "Mynah · permissions")
 
     # backend selector ----------------------------------------------------
 

@@ -8,9 +8,15 @@ sidebar:
 Mynah runs on **Apple Silicon** (M1/M2/M3/…) with a **Metal** GPU backend. Intel Macs aren't
 supported yet.
 
-Grab **`Mynah-X.Y.Z-macos-arm64.zip`** from the
-[**Releases**](https://github.com/RSRaven/mynah/releases) page, unzip it, and move
-**`Mynah.app`** to `/Applications`.
+Grab **`Mynah-X.Y.Z-macos-arm64.dmg`** from the
+[**Releases**](https://github.com/RSRaven/mynah/releases) page, double-click it, and **drag
+`Mynah` into the Applications folder** in the window that opens.
+
+:::note[Prefer a zip?]
+The release also has **`Mynah-X.Y.Z-macos-arm64.zip`** — the same app, but double-clicking a zip
+just unzips `Mynah.app` next to it (no install window). If you use the zip, move `Mynah.app` to
+`/Applications` yourself. The DMG is the easier path.
+:::
 
 ## Clear Gatekeeper (unsigned app)
 

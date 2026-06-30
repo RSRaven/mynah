@@ -35,9 +35,10 @@ optional NVIDIA CUDA upgrade is the one engine pulled on demand, if you choose i
 
 ## Install (macOS — Apple Silicon)
 
-Grab **`Mynah-X.Y.Z-macos-arm64.zip`** from the
-[**Releases**](https://github.com/RSRaven/mynah/releases) page, unzip it, and move
-**`Mynah.app`** to `/Applications`. Apple Silicon (M1/M2/M3/…) only for now.
+Grab **`Mynah-X.Y.Z-macos-arm64.dmg`** from the
+[**Releases**](https://github.com/RSRaven/mynah/releases) page, double-click it, and **drag
+`Mynah` into Applications**. Apple Silicon (M1/M2/M3/…) only for now. (A `.zip` of the same app
+is also published — it just unzips in place, so you move `Mynah.app` to `/Applications` yourself.)
 
 > The app is **unsigned** (notarization is deferred), so Gatekeeper blocks it on first launch.
 > Either **right-click the app → Open** (then confirm once), or run:

@@ -1,6 +1,6 @@
 [project]
 name = "mynah"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local, GPU-accelerated push-to-talk voice typing (free, open-source)"
 readme = "README.md"
 requires-python = ">=3.10"

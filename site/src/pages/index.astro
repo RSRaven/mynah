@@ -331,7 +331,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
           <a href={latestRelease} data-dl="macos" class="btn btn-primary btn-lg">Download for macOS</a>
           <a href={docs} class="btn btn-ghost btn-lg">Read the docs</a>
         </div>
-        <div class="dl-meta">Windows: installer or portable .zip · macOS: Apple Silicon .app · GPU engine bundled · model fetched on first run</div>
+        <div class="dl-meta">Windows: installer or portable .zip · macOS: Apple Silicon .dmg · GPU engine bundled · model fetched on first run</div>
       </div>
     </section>
 
@@ -358,7 +358,7 @@ const ogImage = `${base}brand/mynah-logo.png`;
         const pick = (assets, os) => {
           const find = (re) => assets.find((a) => re.test(a.name));
           if (os === 'windows') return find(/^Mynah-Setup-.*\.exe$/) || find(/\.exe$/);
-          if (os === 'macos') return find(/macos-arm64\.zip$/) || find(/\.dmg$/);
+          if (os === 'macos') return find(/macos-arm64\.dmg$/) || find(/macos-arm64\.zip$/) || find(/\.dmg$/);
           return undefined;
         };
         let cache = null;

@@ -37,6 +37,7 @@ class SettingsWindow:
         self._last_geometry = None          # remember position across re-opens (session)
         self._w: dict = {}                  # widget handles
         self._model_rows: dict = {}         # name -> {status, action, remove}
+        self._perm_rows: dict = {}          # macOS: key -> {status label}
         self._lang_to_code: dict = {}
         self._code_to_lang: dict = {}
         self._pulsing = False
@@ -111,6 +112,7 @@ class SettingsWindow:
             self._root = None
             self._w = {}
             self._model_rows = {}
+            self._perm_rows = {}
 
     # --- build --------------------------------------------------------------
 
@@ -181,6 +183,17 @@ class SettingsWindow:
                       foreground="#777", wraplength=420, justify="left").grid(
                 row=r, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 4))
             r += 1
+
+        # --- macOS permissions --------------------------------------------
+        # Only on macOS, where three TCC grants gate the core loop and a stale grant after an
+        # update silently breaks the Cmd+V paste. The "Reset & re-grant" button clears the grants
+        # tied to the old build's code identity so the next launch re-prompts cleanly.
+        self._perm_rows = {}
+        if self.app.permissions_supported():
+            perm_lf = ttk.LabelFrame(frm, text="Permissions (macOS)", padding=8)
+            perm_lf.grid(row=r, column=0, columnspan=4, sticky="ew", padx=6, pady=(0, 6))
+            r += 1
+            self._build_permissions_panel(tk, ttk, perm_lf)
 
         autostart_var = tk.BooleanVar(value=self.app.run_at_login())
         ttk.Checkbutton(frm, text="Run Mynah at login", variable=autostart_var,
@@ -334,6 +347,33 @@ class SettingsWindow:
         pstatus.grid(row=n + 1, column=0, columnspan=4, sticky="w")
         self._w["progress"] = pb
         self._w["pstatus"] = pstatus
+
+    def _build_permissions_panel(self, tk, ttk, parent) -> None:
+        """macOS-only: one row per TCC grant (status + 'Open Settings'), plus a 'Reset &
+        re-grant' button + a one-line hint. Status is refreshed live in :meth:`_sync`."""
+        rows = self.app.permission_rows()
+        for i, p in enumerate(rows):
+            ttk.Label(parent, text=p["label"], width=18).grid(
+                row=i, column=0, sticky="w", pady=2)
+            st = ttk.Label(parent, text="", width=12)
+            st.grid(row=i, column=1, sticky="w", padx=6)
+            ttk.Button(parent, text="Open Settings", width=13,
+                       command=lambda k=p["key"]: self.app.open_permission_pane(k)).grid(
+                row=i, column=2, padx=2)
+            self._perm_rows[p["key"]] = st
+
+        n = len(rows)
+        ttk.Button(parent, text="Reset & re-grant",
+                   command=self._on_reset_permissions).grid(
+            row=n, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        ttk.Label(parent, justify="left", wraplength=360, foreground="#777",
+                  text="Updated and dictation stopped pasting? macOS ties each grant to the app "
+                       "version. Click Reset, relaunch Mynah, then re-enable it under "
+                       "Accessibility and Input Monitoring.").grid(
+            row=n + 1, column=0, columnspan=4, sticky="w", pady=(0, 2))
+
+    def _on_reset_permissions(self) -> None:
+        self.app.reset_permissions()
 
     def _set_win_icons(self, root) -> None:
         """Crisp titlebar (top-left) + taskbar-button icons on Windows.
@@ -684,6 +724,7 @@ class SettingsWindow:
         self._icon_img = None
         self._w = {}
         self._model_rows = {}
+        self._perm_rows = {}
         if root is not None:
             try:
                 root.destroy()
@@ -761,6 +802,23 @@ class SettingsWindow:
             w["multi"].set(self.app.multilingual_enabled())
         if w.get("wake") is not None and w["wake"].get() != self.app.wakeword_enabled():
             w["wake"].set(self.app.wakeword_enabled())
+
+        self._sync_permissions()
+
+    def _sync_permissions(self) -> None:
+        """Refresh the macOS permission status labels (granted/denied/unknown). No-op when the
+        panel isn't built (off macOS)."""
+        if not self._perm_rows:
+            return
+        marks = {"granted": ("● Granted", "#0a7"),
+                 "denied": ("✕ Not granted", "#c0392b"),
+                 "unknown": ("? Check", "#b8860b")}
+        for p in self.app.permission_rows():
+            label = self._perm_rows.get(p["key"])
+            if label is None:
+                continue
+            text, color = marks.get(p["state"], ("? Check", "#b8860b"))
+            self._conf(label, text=text, foreground=color)
 
     def _sync_models(self) -> None:
         # "Busy" for the Models panel = any download/backend op (the _busy lock) **or** a model
