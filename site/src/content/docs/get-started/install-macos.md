@@ -47,9 +47,9 @@ From a source checkout you can print the current grant status and the exact pane
 
 ## First run
 
-The first launch downloads the **Metal engine pack** (~4 MB) and the speech model
-(`large-v3-turbo` by default) with a progress bar, into `~/Library/Application Support/mynah/`
-and the shared Hugging Face cache. After that it lives in the menu bar and starts quietly.
+The **Metal engine** ships inside the `.app`, so the first launch downloads only the speech
+model (`large-v3-turbo` by default) with a progress bar, into the shared Hugging Face cache.
+After that it lives in the menu bar and starts quietly.
 
 The bird icon colour reflects state: **blue** idle · **red** recording · **amber** transcribing
 · **purple** loading.

@@ -5,6 +5,12 @@ Produces the pinned manifest the component manager reads: for each engine pack a
 **CPU** and optional **CUDA** packs are upstream whisper.cpp release assets (their URLs + sizes
 resolved from the GitHub API, and — with ``--hash-upstream`` — downloaded and sha256-pinned).
 
+As of 0.5.0 the per-OS packs ship **bundled inside the app** (Windows: Vulkan + CPU; macOS:
+Metal), so on a healthy install **nothing here is downloaded** except the optional NVIDIA
+**CUDA** upgrade. The bundled packs are still listed (and published as release assets) with a
+``"bundled": true`` marker, so a *corrupted* in-app pack can self-heal by re-downloading into
+the runtime dir. Only ``whispercpp-cuda`` is a genuine fetch-on-demand.
+
 The output is written both into the build (``mynah/manifest.json``, so it ships inside the
 app) and uploaded as a release asset.
 
@@ -130,12 +136,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.exit(f"ERROR: vulkan zip not found: {args.vulkan_zip}")
         # Our Vulkan pack (hashed from the local build).
         components["whispercpp-vulkan"] = {
-            "kind": "engine", "backend": "vulkan",
+            "kind": "engine", "backend": "vulkan", "bundled": True,
             "url": f"{base}/whispercpp-vulkan-x64.zip",
             "sha256": _sha256(args.vulkan_zip),
             "size": args.vulkan_zip.stat().st_size,
             "license": "MIT", "source": "mynah-release",
-            "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend.",
+            "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend. "
+                    "Bundled in the Windows app; listed here only for self-heal re-download.",
         }
 
     # Our Metal pack (Apple Silicon, arm64) — built on the macOS runner; merged here when its
@@ -144,12 +151,13 @@ def main(argv: list[str] | None = None) -> int:
         if not args.metal_zip.is_file():
             sys.exit(f"ERROR: metal zip not found: {args.metal_zip}")
         components["whispercpp-metal"] = {
-            "kind": "engine", "backend": "metal",
+            "kind": "engine", "backend": "metal", "bundled": True,
             "url": f"{base}/whispercpp-metal-arm64.zip",
             "sha256": _sha256(args.metal_zip),
             "size": args.metal_zip.stat().st_size,
             "license": "MIT", "source": "mynah-release",
-            "note": "Mynah-built Metal whisper.cpp runtime for Apple Silicon (arm64).",
+            "note": "Mynah-built Metal whisper.cpp runtime for Apple Silicon (arm64). "
+                    "Bundled in the macOS app; listed here only for self-heal re-download.",
         }
 
     # Upstream CPU + optional CUDA packs (skipped in --merge-into mode — the base manifest
@@ -163,9 +171,11 @@ def main(argv: list[str] | None = None) -> int:
         if cpu is None:
             sys.exit(f"ERROR: no CPU asset matching whisper-bin-x64.zip in {args.upstream_tag}")
         components["whispercpp-cpu"] = {
-            "kind": "engine", "backend": "cpu", **_upstream_entry(cpu, args.hash_upstream, {
+            "kind": "engine", "backend": "cpu", "bundled": True,
+            **_upstream_entry(cpu, args.hash_upstream, {
                 "license": "MIT",
-                "note": "Upstream CPU build — the no-GPU fallback (single-engine).",
+                "note": "Upstream CPU build — the no-GPU fallback (single-engine). Bundled in "
+                        "the Windows app; listed here only for self-heal re-download.",
             })}
         if cuda is not None:
             components["whispercpp-cuda"] = {

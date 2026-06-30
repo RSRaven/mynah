@@ -93,6 +93,15 @@ class WhisperCppServer(Transcriber):
         exe = self.binary_dir / exe_name
         if not exe.exists():
             raise FileNotFoundError(f"{exe_name} not found in {self.binary_dir}")
+        # PyInstaller bundles datas without the Unix exec bit, and a pack shipped *inside* the
+        # app skips the download path's chmod. Restore +x best-effort so the bundled macOS
+        # server can exec (no-op on Windows / already-executable packs / read-only locations).
+        if os.name != "nt":
+            try:
+                import stat as _stat
+                exe.chmod(exe.stat().st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+            except OSError:
+                pass
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"GGML model not found: {self.model_path} — download "

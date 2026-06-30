@@ -17,18 +17,20 @@ telemetry and no account.
 
 ## What's downloaded (once)
 
-On first run the app fetches, with a progress bar:
+The GPU engine ships **inside the app** (Vulkan + CPU on Windows, Metal on macOS), so on first
+run the app fetches, with a progress bar, only:
 
-- the **engine pack** (~74 MB for Vulkan), and
 - the **speech model** (e.g. `large-v3`, ~3 GB) into the shared Hugging Face cache.
 
-These are static downloads of the engine and model — not your data going out. After that the app
-works fully offline.
+The optional NVIDIA **CUDA** pack (~1.3 GB) is the one engine fetched on demand, and only if you
+opt into it. These are static downloads of the model (and optional CUDA engine) — not your data
+going out. After that the app works fully offline.
 
 ## Where files live
 
 - Config + logs: `%APPDATA%\mynah\`
-- Engine packs: `%LOCALAPPDATA%\mynah\engines\`
+- Bundled engine: inside the app (e.g. `%LOCALAPPDATA%\Programs\Mynah\_engines\`)
+- Downloaded engine packs (CUDA / self-heal): `%LOCALAPPDATA%\mynah\engines\`
 - Models: `~/.cache/huggingface/hub`
 
 Free and open-source under the [MIT License](https://github.com/RSRaven/mynah/blob/master/LICENSE).

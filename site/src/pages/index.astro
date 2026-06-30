@@ -305,13 +305,13 @@ const ogImage = `${base}brand/mynah-logo.png`;
             </table>
           </div>
           <div class="tbl-card">
-            <div class="hd"><h3>GPU backend, auto-picked per OS</h3><p>Vulkan on PC, Metal on Apple Silicon — both need no extra download. RTX 2080 / M2 Pro, large-v3, warm short clip.</p></div>
+            <div class="hd"><h3>GPU backend, auto-picked per OS</h3><p>Vulkan on PC, Metal on Apple Silicon — both ship inside the app, no download. RTX 2080 / M2 Pro, large-v3, warm short clip.</p></div>
             <table class="cmp">
-              <tr><th>Backend</th><th>Works on</th><th>Download</th><th>Speed</th></tr>
-              <tr class="win-row"><td>Vulkan <span class="pill def">PC default</span></td><td>NVIDIA/AMD/Intel</td><td>~74 MB</td><td>sub-second</td></tr>
-              <tr class="win-row"><td>Metal <span class="pill def">Mac default</span></td><td>Apple Silicon</td><td>~4 MB</td><td>sub-second</td></tr>
-              <tr><td>CUDA</td><td>NVIDIA only</td><td>~1.3 GB</td><td>≈ Vulkan</td></tr>
-              <tr><td>CPU</td><td>any machine</td><td>none</td><td>several s</td></tr>
+              <tr><th>Backend</th><th>Works on</th><th>Ships how</th><th>Speed</th></tr>
+              <tr class="win-row"><td>Vulkan <span class="pill def">PC default</span></td><td>NVIDIA/AMD/Intel</td><td>bundled (~74 MB)</td><td>sub-second</td></tr>
+              <tr class="win-row"><td>Metal <span class="pill def">Mac default</span></td><td>Apple Silicon</td><td>bundled (~4 MB)</td><td>sub-second</td></tr>
+              <tr><td>CPU</td><td>any machine</td><td>bundled (PC)</td><td>several s</td></tr>
+              <tr><td>CUDA</td><td>NVIDIA only</td><td>download ~1.3 GB</td><td>≈ Vulkan</td></tr>
             </table>
           </div>
         </div>
@@ -323,15 +323,15 @@ const ogImage = `${base}brand/mynah-logo.png`;
       <div class="wrap reveal">
         <h2>Start dictating in two minutes</h2>
         <p>
-          Grab the build for your OS. First run detects your hardware and downloads the engine pack
-          and model with a progress bar — then it just lives in your tray or menu bar.
+          Grab the build for your OS. The GPU engine ships inside the app, so first run only
+          downloads the model with a progress bar — then it just lives in your tray or menu bar.
         </p>
         <div class="cta-row">
           <a href={latestRelease} data-dl="windows" class="btn btn-primary btn-lg">Download for Windows</a>
           <a href={latestRelease} data-dl="macos" class="btn btn-primary btn-lg">Download for macOS</a>
           <a href={docs} class="btn btn-ghost btn-lg">Read the docs</a>
         </div>
-        <div class="dl-meta">Windows: installer or portable .zip · macOS: Apple Silicon .app · engine + model fetched on first run</div>
+        <div class="dl-meta">Windows: installer or portable .zip · macOS: Apple Silicon .app · GPU engine bundled · model fetched on first run</div>
       </div>
     </section>
 

@@ -73,22 +73,34 @@ Pass the same version to `iscc` that you're shipping. `OutputBaseFilename` becom
 `Mynah-Setup-<version>.exe`, and the version shows in Add/Remove Programs.
 :::
 
-## What's downloaded at first run (not bundled)
+## Bundled engine vs. first-run download
 
-The build contains no engine pack and no model. On first launch the app detects your hardware and
-downloads:
+The official **CI release** bundles the GPU engine inside the app: it stages the **Vulkan** pack
+(~74 MB) and the upstream **CPU** pack into `build/_engines/` before PyInstaller runs (see
+[`scripts/stage_engines.py`](https://github.com/RSRaven/mynah/blob/master/scripts/stage_engines.py)),
+so a shipped `Mynah.exe` needs **no engine download** — only the **speech model** (e.g.
+`large-v3`) is fetched into the shared Hugging Face cache on first run.
 
-- the **Vulkan engine pack** (~74 MB) into `%LOCALAPPDATA%\mynah\engines\`, and
-- the **speech model** (e.g. `large-v3`) into the shared Hugging Face cache.
+A plain local `pyinstaller mynah.spec` with **no** `build/_engines/` falls back to the old
+behaviour: the app downloads the Vulkan pack into `%LOCALAPPDATA%\mynah\engines\` on first run.
+To mirror the release locally, stage the packs first:
 
-This is why the installer is small and why the same `Mynah.exe` "just works" after a fresh build.
+```powershell
+python scripts\stage_engines.py --out build\_engines `
+  --pack vulkan=dist\whispercpp-vulkan-x64.zip `
+  --pack cpu=dist\whispercpp-cpu-x64.zip
+pyinstaller --noconfirm mynah.spec
+```
+
+The optional NVIDIA **CUDA** pack (~1.3 GB) is never bundled — it's the one engine fetched on
+demand, if you opt in.
 
 ## The Vulkan engine pack (you don't need this to build the app)
 
-The prebuilt Vulkan `whisper-server` pack the app downloads is produced separately by CI from
+The prebuilt Vulkan `whisper-server` pack is produced separately by CI from
 [`scripts\build_wcpp_vulkan.bat`](https://github.com/RSRaven/mynah/blob/master/scripts/build_wcpp_vulkan.bat),
 which needs **Visual Studio 2022 Build Tools + the Vulkan SDK**. Building `Mynah.exe` does **not**
-require any of that — the app fetches the pack at runtime.
+require any of that — for a local build the app fetches the pack at runtime unless you stage it.
 
 ## Troubleshooting the build
 

@@ -4,13 +4,20 @@ name: release
 # GitHub Release. `workflow_dispatch` does the same build but uploads the artifacts to the run
 # (a dry run) instead of publishing.
 #
+# As of 0.5.0 the per-OS engine packs ship **bundled inside the app** (Windows: Vulkan + CPU;
+# macOS: Metal), so a healthy install downloads no engine — only the optional NVIDIA CUDA
+# upgrade is fetched on demand. CI stages the packs into build/_engines/ before PyInstaller runs
+# (scripts/stage_engines.py); mynah.spec bundles whatever it finds there.
+#
 #   build         (windows-latest, no GPU): the Vulkan pack (we build it; no upstream asset
-#                 exists), the PyInstaller base, the portable zip, the Inno installer, and the
-#                 manifest.json with the vulkan/cpu/cuda packs.
+#                 exists) + the upstream CPU pack, both staged into the bundle, the PyInstaller
+#                 base, the portable zip, the Inno installer, and the manifest.json with the
+#                 vulkan/cpu/cuda packs.
 #   build-macos   (macos-14, Apple Silicon): the Metal pack (also Mynah-hosted; no upstream
-#                 Metal asset), the .app bundle (ad-hoc signed, unsigned distribution), and the
-#                 SAME manifest with the Metal component merged in. Runs after `build` and reuses
-#                 its manifest so the published manifest carries every backend.
+#                 Metal asset), staged into the .app bundle (ad-hoc signed, unsigned
+#                 distribution), and the SAME manifest with the Metal component merged in. Runs
+#                 after `build` and reuses its manifest so the published manifest carries every
+#                 backend.
 
 on:
   push:
@@ -82,6 +89,25 @@ jobs:
             --upstream-tag v1.9.1 \
             --out mynah/manifest.json \
             --hash-upstream
+
+      # --- bundle the engine packs into the app (no engine download on first run) ----------
+      # Fetch the upstream CPU pack and stage it + the Vulkan pack into build/_engines, which
+      # mynah.spec adds to the bundle. The CPU pack is the no-driver floor (Vulkan needs the
+      # GPU driver's vulkan-1.dll); CUDA stays download-only.
+      - name: Fetch upstream CPU pack
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip" `
+            -OutFile "dist/whispercpp-cpu-x64.zip"
+
+      - name: Stage engine packs (vulkan + cpu) into the bundle
+        shell: bash
+        run: |
+          python scripts/stage_engines.py --out build/_engines \
+            --pack vulkan=dist/whispercpp-vulkan-x64.zip \
+            --pack cpu=dist/whispercpp-cpu-x64.zip
 
       - name: Build app (PyInstaller, onedir/windowed)
         run: pyinstaller --noconfirm mynah.spec
@@ -180,6 +206,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e . pyinstaller pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ApplicationServices
+
+      # --- bundle the Metal pack into the .app (no engine download on first run) -----------
+      - name: Stage engine pack (metal) into the bundle
+        run: |
+          python scripts/stage_engines.py --out build/_engines \
+            --pack metal=dist/whispercpp-metal-arm64.zip
 
       - name: Build app (PyInstaller, .app bundle)
         run: pyinstaller --noconfirm mynah.spec

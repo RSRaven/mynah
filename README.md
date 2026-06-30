@@ -29,8 +29,9 @@ page:
 > Run anyway**.
 
 **First run** opens a short setup screen: Mynah detects your hardware, then downloads the
-small engine pack (~74 MB) and the speech model with a progress bar. After that it lives in
-the tray and starts quietly. Everything is downloaded on demand, so the installer stays small.
+speech model with a progress bar. The GPU engine (Vulkan + a CPU fallback) ships inside the
+app, so only the model is fetched. After that it lives in the tray and starts quietly. The
+optional NVIDIA CUDA upgrade is the one engine pulled on demand, if you choose it.
 
 ## Install (macOS — Apple Silicon)
 
@@ -44,9 +45,9 @@ Grab **`Mynah-X.Y.Z-macos-arm64.zip`** from the
 > xattr -dr com.apple.quarantine /Applications/Mynah.app
 > ```
 
-Mynah is a **menu-bar** app (no Dock icon). On first run it downloads the **Metal** engine pack
-+ the speech model, then sits in the menu bar. macOS will ask for three permissions the core
-loop needs — grant each in **System Settings → Privacy & Security**:
+Mynah is a **menu-bar** app (no Dock icon). The **Metal** engine ships inside the `.app`, so on
+first run it downloads only the speech model, then sits in the menu bar. macOS will ask for
+three permissions the core loop needs — grant each in **System Settings → Privacy & Security**:
 
 - **Microphone** — to hear you (prompts automatically on first capture).
 - **Input Monitoring** — to detect the push-to-talk hotkey.

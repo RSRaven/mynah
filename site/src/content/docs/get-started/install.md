@@ -21,8 +21,10 @@ anyway**.
 ## First run
 
 The first launch opens a short setup screen: Mynah detects your hardware, then downloads the
-small engine pack (~74 MB) and the speech model with a progress bar. After that it lives in the
-tray and starts quietly. Everything is downloaded on demand, so the installer stays small.
+speech model with a progress bar. The GPU engine (Vulkan, plus a CPU fallback) ships inside the
+app, so there's no engine download — only the model is fetched. After that it lives in the tray
+and starts quietly. The optional NVIDIA CUDA upgrade is the one engine pulled on demand, if you
+choose it.
 
 The tray icon colour reflects state: **blue** idle · **red** recording · **amber** transcribing
 · **purple** loading.

@@ -39,7 +39,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
-from .transcriber import engine_dir
+from .transcriber import active_engine_dir, bundled_engine_dir, engine_dir
 
 # progress callback: cb(done_bytes:int, total_bytes:int|None, status:str)
 ProgressCb = Callable[[int, "int | None", str], None]
@@ -137,12 +137,21 @@ def _server_present(bdir: Path) -> bool:
         return False
 
 
+def is_bundled(backend: str) -> bool:
+    """Does this backend ship **inside the app** (no download needed)? Windows ships
+    Vulkan + CPU, macOS ships Metal; the optional CUDA pack is never bundled."""
+    return bundled_engine_dir(backend) is not None
+
+
 def is_installed(backend: str) -> bool:
-    return _server_present(engine_dir(backend))
+    """Is a usable engine pack present for ``backend`` — bundled in the app **or** downloaded?
+    A bundled pack counts as installed, so first-run setup and the model download skip the
+    engine fetch entirely (only the optional CUDA upgrade is ever pulled on demand)."""
+    return _server_present(active_engine_dir(backend))
 
 
 def installed_size(backend: str) -> int:
-    root = engine_dir(backend)
+    root = active_engine_dir(backend)
     total = 0
     if root.is_dir():
         for p in root.rglob("*"):
@@ -308,6 +317,14 @@ def install_engine(backend: str, progress: ProgressCb | None = None,
     not ``force``. Raises :class:`ComponentError` on a missing manifest entry or a failed
     download/verify — the caller is expected to fall back to a smaller/CPU path rather than
     dead-end."""
+    # A pack bundled inside the app is always "installed" and never downloaded — return its
+    # in-app dir (ignores ``force``; there's nothing to (re)fetch for a bundled backend).
+    bundled = bundled_engine_dir(backend)
+    if bundled is not None:
+        if progress:
+            progress(1, 1, f"{backend} engine bundled with the app")
+        return bundled
+
     target = engine_dir(backend)
     if is_installed(backend) and not force:
         if progress:

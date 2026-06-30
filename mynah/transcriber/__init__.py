@@ -26,7 +26,8 @@ from .base import Transcriber
 
 __all__ = ["Transcriber", "build_transcriber", "ggml_filename", "installed_ggml_models",
            "whispercpp_binary_dir", "lid_model_path", "vad_model_path",
-           "engine_dir", "installed_backends", "resolve_backend", "set_backend"]
+           "engine_dir", "bundled_engine_dir", "active_engine_dir", "backend_present",
+           "installed_backends", "resolve_backend", "set_backend"]
 
 # Legacy engine values from the dual-engine era; accepted and remapped to whisper.cpp so
 # existing configs keep working after the single-engine rework.
@@ -73,8 +74,40 @@ def _engines_root() -> Path:
 
 
 def engine_dir(backend: str) -> Path:
-    """The per-backend whisper.cpp build dir, e.g. ``engines/whispercpp-vulkan``."""
+    """The per-backend whisper.cpp build dir the component manager **downloads** into, e.g.
+    ``engines/whispercpp-vulkan`` under ``runtime_data_dir()``. This is the *install target*;
+    use :func:`active_engine_dir` to resolve the dir actually used at runtime (which prefers a
+    pack bundled inside the frozen app)."""
     return _engines_root() / f"whispercpp-{backend}"
+
+
+def _bundled_root() -> Path | None:
+    """Root of the engine packs **bundled inside the frozen app**, or None when not frozen.
+
+    PyInstaller unpacks bundled ``datas`` under ``sys._MEIPASS`` (onefile) or beside the
+    executable in the COLLECT dir (onedir — what we ship). We place packs under
+    ``_engines/whispercpp-<backend>`` there (see ``scripts/stage_engines.py`` + ``mynah.spec``),
+    so a healthy install needs no engine download: Vulkan+CPU on Windows, Metal on macOS."""
+    if not getattr(sys, "frozen", False):
+        return None
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(sys.executable)
+    return Path(base) / "_engines"
+
+
+def bundled_engine_dir(backend: str) -> Path | None:
+    """The bundled pack dir for ``backend`` if it ships inside this build, else None."""
+    root = _bundled_root()
+    if root is None:
+        return None
+    cand = root / f"whispercpp-{backend}"
+    return cand if _is_file(_server_exe(cand)) else None
+
+
+def active_engine_dir(backend: str) -> Path:
+    """The engine dir actually used at runtime for ``backend``: a **bundled** pack (shipped in
+    the frozen app) wins over a **downloaded** one. Falls back to the download dir path so
+    callers always get a well-defined location (even before anything is installed)."""
+    return bundled_engine_dir(backend) or engine_dir(backend)
 
 
 def _server_exe(bdir: Path) -> Path:
@@ -92,24 +125,31 @@ def _is_file(p: Path) -> bool:
         return False
 
 
+def backend_present(backend: str) -> bool:
+    """Is a usable whisper-server present for ``backend`` — either **bundled** in the frozen
+    app or **downloaded** into the runtime dir?"""
+    return _is_file(_server_exe(active_engine_dir(backend)))
+
+
 def installed_backends() -> list[str]:
-    """Backends whose engine pack is actually present (has a whisper-server binary)."""
-    return [b for b in _BACKENDS if _is_file(_server_exe(engine_dir(b)))]
+    """Backends whose engine pack is actually present (bundled or downloaded)."""
+    return [b for b in _BACKENDS if backend_present(b)]
 
 
 def resolve_backend(pref: str | None = None) -> str:
     """Map a backend preference to a concrete backend name.
 
-    ``auto`` (the default) picks the best **installed** pack in this platform's priority order
-    (macOS: Metal then CPU; else Vulkan, optional CUDA, then CPU); if nothing is installed yet
-    it resolves to the platform default (Metal on macOS, Vulkan elsewhere) so paths are
-    well-defined for setup + error messages. A concrete preference is honoured as-is."""
+    ``auto`` (the default) picks the best **present** pack in this platform's priority order
+    (macOS: Metal then CPU; else Vulkan, optional CUDA, then CPU) — a pack bundled in the
+    frozen app counts the same as a downloaded one; if nothing is present yet it resolves to
+    the platform default (Metal on macOS, Vulkan elsewhere) so paths are well-defined for
+    setup + error messages. A concrete preference is honoured as-is."""
     pref = (pref or _selected_backend or os.environ.get("MYNAH_BACKEND") or "auto").lower()
     if pref in _BACKENDS:
         return pref
-    # auto (or anything unknown): first installed in priority order, else the platform default.
+    # auto (or anything unknown): first present in priority order, else the platform default.
     for b in _BACKENDS:
-        if _is_file(_server_exe(engine_dir(b))):
+        if backend_present(b):
             return b
     return _DEFAULT_BACKEND
 
@@ -124,7 +164,7 @@ def whispercpp_binary_dir(model_cfg: dict | None = None) -> Path:
     pin = model_cfg.get("whispercpp_dir")
     if pin:
         return Path(pin)
-    return engine_dir(resolve_backend(model_cfg.get("backend")))
+    return active_engine_dir(resolve_backend(model_cfg.get("backend")))
 
 
 # --- model / multilingual weight locations (shared HF cache, see mynah.models) ----------

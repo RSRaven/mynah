@@ -1,38 +1,41 @@
 {
   "schema": 1,
-  "version": "0.4.2",
+  "version": "0.5.0",
   "generated": "template — CI (scripts/make_manifest.py) overwrites sha256+size at release time",
-  "release_base": "https://github.com/RSRaven/mynah/releases/download/v0.4.2",
+  "release_base": "https://github.com/RSRaven/mynah/releases/download/v0.5.0",
   "components": {
     "whispercpp-vulkan": {
       "kind": "engine",
       "backend": "vulkan",
-      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.2/whispercpp-vulkan-x64.zip",
+      "bundled": true,
+      "url": "https://github.com/RSRaven/mynah/releases/download/v0.5.0/whispercpp-vulkan-x64.zip",
       "sha256": "",
       "size": 0,
       "license": "MIT",
       "source": "mynah-release",
-      "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend (no upstream Vulkan asset exists)."
+      "note": "Mynah-built Vulkan whisper.cpp runtime — the default GPU backend. Bundled in the Windows app; listed here only for self-heal re-download."
     },
     "whispercpp-metal": {
       "kind": "engine",
       "backend": "metal",
-      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.2/whispercpp-metal-arm64.zip",
+      "bundled": true,
+      "url": "https://github.com/RSRaven/mynah/releases/download/v0.5.0/whispercpp-metal-arm64.zip",
       "sha256": "",
       "size": 0,
       "license": "MIT",
       "source": "mynah-release",
-      "note": "Mynah-built Metal whisper.cpp runtime for Apple Silicon (arm64; no upstream Metal server asset)."
+      "note": "Mynah-built Metal whisper.cpp runtime for Apple Silicon (arm64). Bundled in the macOS app; listed here only for self-heal re-download."
     },
     "whispercpp-cpu": {
       "kind": "engine",
       "backend": "cpu",
+      "bundled": true,
       "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip",
       "sha256": "",
       "size": 0,
       "license": "MIT",
       "source": "upstream-whisper.cpp",
-      "note": "Upstream CPU build — the no-GPU fallback (single-engine)."
+      "note": "Upstream CPU build — the no-GPU fallback (single-engine). Bundled in the Windows app; listed here only for self-heal re-download."
     },
     "whispercpp-cuda": {
       "kind": "engine",

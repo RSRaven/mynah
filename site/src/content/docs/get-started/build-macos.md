@@ -51,9 +51,17 @@ Output (~4 MB): `whisper-server`, `libwhisper.dylib`, and the `libggml*.dylib` s
 
 ## 2. Build the .app (PyInstaller)
 
+Stage the Metal pack into the bundle first (so the shipped `.app` needs no engine download),
+then build:
+
 ```bash
+python scripts/stage_engines.py --out build/_engines \
+  --pack metal=dist/whispercpp-metal-arm64.zip
 pyinstaller --noconfirm mynah.spec        # -> dist/Mynah.app
 ```
+
+If you skip the staging step, the build still works — it just falls back to downloading the
+Metal pack on first run instead of carrying it inside the `.app`.
 
 The darwin branch of [`mynah.spec`](https://github.com/RSRaven/mynah/blob/master/mynah.spec):
 
@@ -101,15 +109,16 @@ ditto -c -k --keepParent dist/Mynah.app "dist/Mynah-0.4.0-macos-arm64.zip"
 Distribute the zip. The app is unsigned, so users do a one-time Gatekeeper bypass and grant the
 three permissions — see [Install (macOS)](/mynah/get-started/install-macos/).
 
-## What's downloaded at first run (not bundled)
+## What's bundled vs. downloaded at first run
 
-`Mynah.app` carries no model. On first launch it downloads the Metal engine pack into
-`~/Library/Application Support/mynah/engines/` and the speech model into the shared Hugging Face
-cache — which is why the build stays small and the same `.app` "just works" after a fresh build.
+A `Mynah.app` built with the staging step above carries the **Metal engine** inside the bundle,
+so on first launch it downloads only the **speech model** into the shared Hugging Face cache. The
+`.app` still carries no model — that stays a first-run download.
 
 ## CI builds this for you
 
 The `build-macos` job (on `macos-14`) in
 [`release.yml`](https://github.com/RSRaven/mynah/blob/master/.github/workflows/release.yml) runs
-all of the above on a tag: builds the pack + `.app`, ad-hoc signs, zips, merges the Metal
-component into `manifest.json`, and uploads everything to the GitHub Release.
+all of the above on a tag: builds the pack, stages it into the bundle, builds + ad-hoc signs the
+`.app`, zips, merges the Metal component into `manifest.json`, and uploads everything to the
+GitHub Release.
