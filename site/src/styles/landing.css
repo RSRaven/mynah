@@ -808,6 +808,11 @@ td .pill {
   background: rgba(91, 123, 240, 0.16);
   color: #9db4ff;
 }
+.win-row td:first-child .pill.def {
+  display: block;
+  width: fit-content;
+  margin-top: 5px;
+}
 .win-row td:first-child {
   color: var(--text);
   font-weight: 600;
