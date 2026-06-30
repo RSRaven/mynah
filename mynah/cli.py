@@ -175,6 +175,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help=argparse.SUPPRESS)  # internal: diagnostic for the clipboard-paste path.
     p.add_argument("--selftest-keys", action="store_true",
                    help=argparse.SUPPRESS)  # internal: diagnostic for the global key listener.
+    p.add_argument("--selftest-engine", action="store_true",
+                   help=argparse.SUPPRESS)  # internal: diagnostic for the engine-pack download.
     p.add_argument("--version", action="version", version=f"mynah {__version__}")
     return p
 
@@ -298,6 +300,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"selftest-keys: received {got['n']} key events "
               f"({'OK' if got['n'] else 'NONE — listener is not receiving input'})")
         return 0
+
+    if getattr(args, "selftest_engine", False):
+        # Diagnostic: download + install the engine pack from THIS process/identity (used to
+        # confirm the frozen .app can fetch over HTTPS — the certifi SSL-context fix).
+        from . import components
+        from .transcriber import resolve_backend
+
+        backend = resolve_backend("auto")
+        print(f"selftest-engine: installing '{backend}' pack…")
+        try:
+            path = components.install_engine(backend, force=True)
+            ok = components.is_installed(backend)
+            print(f"selftest-engine: {'OK' if ok else 'FAILED'} — installed at {path}")
+            return 0 if ok else 1
+        except Exception as e:
+            print(f"selftest-engine: FAILED: {e!r}")
+            return 1
 
     if getattr(args, "selftest_paste", False):
         # Diagnostic: exercise the exact clipboard-paste insert path from THIS process/identity

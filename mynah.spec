@@ -117,8 +117,8 @@ if IS_MACOS:
         info_plist={
             "CFBundleName": "Mynah",
             "CFBundleDisplayName": "Mynah",
-            "CFBundleShortVersionString": "0.4.0",
-            "CFBundleVersion": "0.4.0",
+            "CFBundleShortVersionString": "0.4.1",
+            "CFBundleVersion": "0.4.1",
             "LSUIElement": True,            # menu-bar agent, no Dock icon / app switcher entry
             "LSMinimumSystemVersion": "12.0",
             "NSMicrophoneUsageDescription":

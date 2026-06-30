@@ -48,6 +48,30 @@ _MANIFEST_NAME = "manifest.json"
 _SERVER_EXE = "whisper-server.exe" if os.name == "nt" else "whisper-server"
 _CHUNK = 1024 * 256
 
+_ssl_ctx = None
+
+
+def _ssl_context():
+    """SSL context for HTTPS downloads, backed by the **certifi** CA bundle.
+
+    In a frozen app (PyInstaller) Python can't read the system CA store, so a bare
+    ``urllib`` HTTPS request fails with ``CERTIFICATE_VERIFY_FAILED`` — which is exactly why
+    the engine-pack download dies on a fresh macOS install (the model download works because
+    huggingface_hub/requests already bundle certifi). Build the context from certifi when it's
+    available, else fall back to the platform default. Cached after the first build."""
+    global _ssl_ctx
+    if _ssl_ctx is not None:
+        return _ssl_ctx
+    import ssl
+
+    try:
+        import certifi
+
+        _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        _ssl_ctx = ssl.create_default_context()
+    return _ssl_ctx
+
 
 class ComponentError(RuntimeError):
     pass
@@ -63,7 +87,8 @@ def _read_text_source(src: str) -> str:
     """Read a manifest from a path or a URL (http/https/file)."""
     parsed = urllib.parse.urlparse(src)
     if parsed.scheme in ("http", "https", "file"):
-        with urllib.request.urlopen(src, timeout=30) as r:  # noqa: S310 (trusted manifest)
+        ctx = _ssl_context() if parsed.scheme == "https" else None
+        with urllib.request.urlopen(src, timeout=30, context=ctx) as r:  # noqa: S310 (trusted manifest)
             return r.read().decode("utf-8")
     return Path(src).read_text(encoding="utf-8")
 
@@ -170,7 +195,8 @@ def _download(url: str, dest: Path, expected_size: int | None,
             headers["Range"] = f"bytes={resume_from}-"
         req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+            ctx = _ssl_context() if parsed.scheme == "https" else None
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:  # noqa: S310
                 # If the server ignored Range (200 not 206), restart from scratch.
                 mode = "ab"
                 if resume_from and resp.status == 200:
