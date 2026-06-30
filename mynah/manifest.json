@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "generated": "template — CI (scripts/make_manifest.py) overwrites sha256+size at release time",
-  "release_base": "https://github.com/RSRaven/mynah/releases/download/v0.4.0",
+  "release_base": "https://github.com/RSRaven/mynah/releases/download/v0.4.1",
   "components": {
     "whispercpp-vulkan": {
       "kind": "engine",
       "backend": "vulkan",
-      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.0/whispercpp-vulkan-x64.zip",
+      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.1/whispercpp-vulkan-x64.zip",
       "sha256": "",
       "size": 0,
       "license": "MIT",
@@ -17,7 +17,7 @@
     "whispercpp-metal": {
       "kind": "engine",
       "backend": "metal",
-      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.0/whispercpp-metal-arm64.zip",
+      "url": "https://github.com/RSRaven/mynah/releases/download/v0.4.1/whispercpp-metal-arm64.zip",
       "sha256": "",
       "size": 0,
       "license": "MIT",
